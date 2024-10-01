@@ -1,14 +1,12 @@
 {
-	"name": "tauri-plugin-midi",
-	"version": "0.0.0",
-	"sideEffects": true,
-	"main": "./guest-js/index.ts",
-	"types": "./guest-js/index.ts",
-	"scripts": {
-		"build:types": "tsc"
-	},
-	"dependencies": {
-		"@tanstack/solid-query": "^4.36.1",
-		"@tauri-apps/api": "^1.5.3"
-	}
+  "name": "tauri-plugin-midi",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && esbuild ./guest-js/index.ts --bundle --outfile=src/polyfill.js --platform=browser"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "2.0.0-rc.6",
+    "esbuild": "^0.24.0"
+  }
 }

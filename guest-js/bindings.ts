@@ -84,6 +84,7 @@ function __makeEvents__<T extends Record<string, any>>(
 					apply: (_, __, [window]: [__WebviewWindow__]) => ({
 						listen: (arg: any) => window.listen(name, arg),
 						once: (arg: any) => window.once(name, arg),
+						// @ts-expect-error
 						emit: (arg: any) => window.emit(name, arg),
 					}),
 					get: (_, command: keyof __EventObj__<any>) => {

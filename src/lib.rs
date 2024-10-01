@@ -3,6 +3,7 @@
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
+    thread::spawn,
     time::Duration,
 };
 
@@ -22,6 +23,8 @@ struct MidiState {
 type State = Arc<Mutex<MidiState>>;
 
 const PLUGIN_NAME: &str = "midi";
+
+const POLYFILL_JS: &str = include_str!("./polyfill.js");
 
 fn get_inputs(midi_in: &midir::MidiInput) -> Result<Vec<String>, String> {
     midi_in
@@ -189,6 +192,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
     Builder::new(PLUGIN_NAME)
         .invoke_handler(builder.invoke_handler())
+        .js_init_script(POLYFILL_JS.into())
         .setup(move |app, _| {
             app.manage(State::default());
 
@@ -200,7 +204,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             coremidi_hotplug_notification::receive_device_updates(|| {})
                 .expect("Failed to register for MIDI device updates");
 
-            tokio::spawn(async move {
+            spawn(move || {
                 let midi_in = midir::MidiInput::new("tauri-plugin-midi blank input")
                     .map_err(|e| format!("Failed to create MIDI input: {e}"))
                     .unwrap();

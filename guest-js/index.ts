@@ -1,5 +1,5 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { events, commands } from "./bindings";
+import { events, commands } from "./bindings.js";
 
 // https://webaudio.github.io/web-midi-api
 
@@ -30,7 +30,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 	constructor() {
 		super();
 
-		events.stateChange.listen((event) => {
+		events.stateChange.listen((event: any) => {
 			const { inputs, outputs } = event.payload;
 
 			let dirty = false;
@@ -156,7 +156,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 
 	open() {
 		if (!this.stopListening)
-			this.stopListening = events.midiMessage.listen((event) => {
+			this.stopListening = events.midiMessage.listen((event: any) => {
 				const [inputName, data] = event.payload;
 
 				if (inputName !== this.name) return;
