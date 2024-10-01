@@ -1,5 +1,6 @@
 [package]
 name = "tauri-plugin-midi"
+links = "tauri-plugin-midi"
 description = "A WebMIDI-compatible plugin for Tauri"
 license = "MIT"
 version = "0.1.0"
@@ -26,3 +27,6 @@ coremidi-hotplug-notification = "0.1.1"
 [dev-dependencies]
 tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
 specta-typescript = { version = "0.0.7" }
+
+[build-dependencies]
+tauri-plugin = { version = "2.0.0-rc.13", features = ["build"] }

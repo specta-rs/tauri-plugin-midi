@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-close-input"
+description = "Enables the close_input command without any pre-configured scope."
+commands.allow = ["close_input"]
+
+[[permission]]
+identifier = "deny-close-input"
+description = "Denies the close_input command without any pre-configured scope."
+commands.deny = ["close_input"]

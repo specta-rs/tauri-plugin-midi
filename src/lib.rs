@@ -24,8 +24,6 @@ type State = Arc<Mutex<MidiState>>;
 
 const PLUGIN_NAME: &str = "midi";
 
-const POLYFILL_JS: &str = include_str!("./polyfill.js");
-
 fn get_inputs(midi_in: &midir::MidiInput) -> Result<Vec<String>, String> {
     midi_in
         .ports()
@@ -84,7 +82,9 @@ fn open_input<R: tauri::Runtime>(
             {
                 let name = name.clone();
                 move |_, msg, _| {
-                    MIDIMessage(name.to_string(), msg.to_vec()).emit(&app).ok();
+                    MIDIMessage(name.to_string(), msg.to_vec())
+                        .emit(&app)
+                        .unwrap();
                 }
             },
             (),
@@ -196,7 +196,6 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
     Builder::new(PLUGIN_NAME)
         .invoke_handler(builder.invoke_handler())
-        .js_init_script(POLYFILL_JS.into())
         .setup(move |app, _| {
             app.manage(State::default());
 
@@ -222,7 +221,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                         outputs: get_outputs(&midi_out).unwrap_or_default(),
                     }
                     .emit(&app)
-                    .ok();
+                    .unwrap();
 
                     std::thread::sleep(Duration::from_millis(1000));
                 }

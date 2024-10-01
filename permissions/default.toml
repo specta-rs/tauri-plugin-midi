@@ -1,0 +1,13 @@
+[default]
+description = """
+This permission set configures if your
+application can use WebMIDI.
+"""
+
+permissions = [
+    "midi:allow-open-input",
+    "midi:allow-close-input",
+    "midi:allow-open-output",
+    "midi:allow-close-output",
+    "midi:allow-output-send",
+]
