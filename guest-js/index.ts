@@ -177,14 +177,17 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 		return super.close();
 	}
 
-	private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
+	// TODO: Cleanup this stuff
+	// private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
 
-	get onmidimessage() {
-		return this._onmidimessage;
-	}
+	// get onmidimessage() {
+	// 	return this._onmidimessage;
+	// }
 
 	set onmidimessage(cb: ((this: MIDIInput, ev: Event) => any) | null) {
-		this._onmidimessage = cb;
+		// this._onmidimessage = cb;
+
+		this.addEventListener("midimessage", cb as any);
 
 		if (this.connection !== "open") this.open();
 	}
@@ -210,4 +213,12 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
 
 const access = new TauriMIDIAccess();
 
-navigator.requestMIDIAccess = () => Promise.resolve(access);
+// TODO: We could possible just ensure `access` already has data so this can be done while JS is still loading in the webview
+// TODO: and then it only every await's the first time.
+navigator.requestMIDIAccess = () => {
+	// We wait for the next update to ensure we have initialised the inputs and outputs.
+    // This event is emitted regularly by the backend
+    return new Promise((resolve) => access.addEventListener("statechange", () => resolve(access)));
+};
+
+// navigator.requestMIDIAccess = () => Promise.resolve(access);

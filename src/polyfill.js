@@ -210,7 +210,6 @@
   var TauriMIDIInput = class extends TauriMIDIPort {
     constructor(name) {
       super(name, "input");
-      this._onmidimessage = null;
     }
     open() {
       if (!this.stopListening)
@@ -229,11 +228,13 @@
       this.stopListening?.then((cb) => cb());
       return super.close();
     }
-    get onmidimessage() {
-      return this._onmidimessage;
-    }
+    // TODO: Cleanup this stuff
+    // private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
+    // get onmidimessage() {
+    // 	return this._onmidimessage;
+    // }
     set onmidimessage(cb) {
-      this._onmidimessage = cb;
+      this.addEventListener("midimessage", cb);
       if (this.connection !== "open") this.open();
     }
   };
@@ -249,5 +250,7 @@
     }
   };
   var access = new TauriMIDIAccess();
-  navigator.requestMIDIAccess = () => Promise.resolve(access);
+  navigator.requestMIDIAccess = () => {
+    return new Promise((resolve) => access.addEventListener("statechange", () => resolve(access)));
+  };
 })();
