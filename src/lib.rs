@@ -184,8 +184,12 @@ fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
 /// Initialise the Tauri MIDI plugin
 ///
 /// # Example
-/// ```rs
-/// // TODO
+///
+/// ```rust
+///  tauri::Builder::default()
+///        // Just add this plugin to your Tauri builder
+///        .plugin(tauri_plugin_midi::init());
+///        // .... rest of your builder
 /// ```
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     let builder = builder::<R>();

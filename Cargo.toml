@@ -2,11 +2,16 @@
 name = "tauri-plugin-midi"
 description = "A WebMIDI-compatible plugin for Tauri"
 license = "MIT"
-version = "0.0.0"
-authors = ["You"]
+version = "0.1.0"
+authors = ["Brendan Allan", "Oscar Beaumont"]
 edition = "2021"
 rust-version = "1.60"
 include = ["src/**/*", "dist", "Cargo.toml", "README.md", "LICENSE"]
+
+# /bin/sh RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
+[package.metadata."docs.rs"]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 midir = "0.9.1"

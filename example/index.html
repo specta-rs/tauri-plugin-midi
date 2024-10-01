@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <!-- Copied from: https://airtightinteractive.com/demos/webmiditest/ -->
+    <title>Web Midi Test</title>
+    <meta charset="utf-8" />
+    <meta
+      name="description"
+      content="This page shows the simplest possible implementation of handling Web MIDI API Input."
+    />
+
+    <style type="text/css">
+      body {
+        margin: 40px auto;
+        max-width: 650px;
+        line-height: 1.6;
+        font-size: 18px;
+        color: #444;
+        padding: 0 10px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.2;
+      }
+
+      #midi-log {
+        height: 400px;
+        overflow: auto;
+        border: 1px solid #ccc;
+        padding: 20px;
+        font-family: monospace;
+        font-size: 16px;
+        margin-bottom: 40px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Web MIDI API Input Test Page</h1>
+
+    <p>
+      This page shows the simplest possible implementation of handling Web MIDI
+      API Input.
+    </p>
+
+    <p>
+      Web MIDI API is supported in all current versions of Chrome and Opera on
+      all OSes. Other browsers require the
+      <a href="https://github.com/cwilso/WebMIDIAPIShim"
+        >Web MIDI API Polyfill</a
+      >.
+    </p>
+
+    <p>To test MIDI Input:</p>
+    <ol>
+      <li>Plug in your MIDI device via USB to your computer.</li>
+      <li>Twiddle some knobs. View received MIDI data below.</li>
+      <li>That's it!</li>
+    </ol>
+
+    <h2>MIDI Data Log</h2>
+
+    <div id="midi-log"></div>
+
+    <p>
+      View source to see how little JavaScript is required to read MIDI input.
+      Code is adapted from Chris Wilson's
+      <a href="https://github.com/cwilso/WebMIDIAPIShim"
+        >Web MIDI API Polyfill</a
+      >
+      Test Pages.
+    </p>
+    <p>
+      Questions / Comments:
+      <a href="https://twitter.com/felixturner">@felixturner</a>
+    </p>
+
+    <script>
+      //Bare minimum JS code to read midi input
+      //Adapted from https://github.com/cwilso/WebMIDIAPIShim
+
+      var midi;
+      var log = document.getElementById("midi-log");
+      init();
+
+      function init() {
+        logText("Initializing MIDI...");
+        navigator.requestMIDIAccess().then(onSuccess, onFailure); //get midi access
+      }
+
+      function onSuccess(access) {
+        midi = access;
+        var inputs = midi.inputs;
+
+        logText("Found " + inputs.size + " MIDI input(s)");
+
+        //connect to first device found
+        if (inputs.size > 0) {
+          var iterator = inputs.values(); // returns an iterator that loops over all inputs
+          var input = iterator.next().value; // get the first input
+          logText("Connected first input: " + input.name);
+          input.onmidimessage = handleMIDIMessage;
+        }
+      }
+
+      function onFailure(err) {
+        logText("MIDI Init Error. Error code: " + err.code);
+      }
+
+      function handleMIDIMessage(event) {
+        //event.data & event.receivedTime are populated
+        //event.data has 3 components:
+        //0) The device id
+        //1) The controller id
+        //2) The controller value (typically in the range 0 - 127)
+
+        if (event.data.length === 3) {
+          logText(
+            "controller id: " + event.data[1] + ", value: " + event.data[2]
+          );
+        }
+      }
+
+      function logText(str) {
+        log.innerHTML += str;
+        log.innerHTML += "<br>";
+        log.scrollTop = log.scrollHeight;
+      }
+    </script>
+  </body>
+</html>
