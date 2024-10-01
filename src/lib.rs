@@ -23,6 +23,7 @@ struct MidiState {
 type State = Arc<Mutex<MidiState>>;
 
 const PLUGIN_NAME: &str = "midi";
+const RUNTIME_POLYFILL: &str = include_str!("polyfill.js");
 
 fn get_inputs(midi_in: &midir::MidiInput) -> Result<Vec<String>, String> {
     midi_in
@@ -196,6 +197,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
     Builder::new(PLUGIN_NAME)
         .invoke_handler(builder.invoke_handler())
+        .js_init_script(RUNTIME_POLYFILL.into())
         .setup(move |app, _| {
             app.manage(State::default());
 
