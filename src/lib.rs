@@ -184,7 +184,7 @@ fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
         .events(tauri_specta::collect_events![StateChange, MIDIMessage])
 }
 
-/// Initialise the plugin which will take care of polyfilling WebMIDI into any Tauri webviews.
+/// Initialise the plugin which will take care of polyfilling WebMIDI into any Tauri webview.
 ///
 /// # Usage
 ///
