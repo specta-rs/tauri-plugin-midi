@@ -7,7 +7,11 @@ version = "0.1.0"
 authors = ["Brendan Allan", "Oscar Beaumont"]
 edition = "2021"
 rust-version = "1.60"
-include = ["src/**/*", "dist", "Cargo.toml", "README.md", "LICENSE"]
+include = ["/src", "/build.rs", "/permissions", "/LICENSE", "/README.md"]
+repository = "https://github.com/specta-rs/tauri-plugin-midi"
+documentation = "https://docs.rs/tauri-plugin-midi"
+keywords = ["tauri", "midi", "webmidi", "tauri-plugin"]
+categories = ["web-programming"]
 
 # /bin/sh RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
 [package.metadata."docs.rs"]
