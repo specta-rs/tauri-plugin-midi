@@ -8,6 +8,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
 	inputs = new Map<string, TauriMIDIInput>();
 	outputs = new Map<string, TauriMIDIOutput>();
+	ready: Promise<void>;
 
 	onstatechange: ((this: MIDIAccess, ev: Event) => any) | null = null;
 
@@ -29,6 +30,13 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
 	constructor() {
 		super();
+
+		// TODO: This could be `Promise.withResolvers` when it's stable
+		let resolve: (value: any) => void;
+		this.ready = new Promise((r, reject) => {
+			resolve = r;
+			setTimeout(() => reject(new Error("Failed to initialise WebMIDI")), 10_000);
+		});
 
 		events.stateChange.listen((event: any) => {
 			const { inputs, outputs } = event.payload;
@@ -76,6 +84,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 			}
 
 			if (dirty) this.dispatchEvent(new Event("statechange"));
+			resolve(void 0);
 		});
 	}
 }
@@ -150,6 +159,9 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
 class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 	constructor(name: string) {
 		super(name, "input");
+		this.addEventListener("midimessage", (cb) => {
+			if (this.onmidimessage) this.onmidimessage(cb);
+		});
 	}
 
 	private stopListening?: Promise<UnlistenFn>;
@@ -177,18 +189,14 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 		return super.close();
 	}
 
-	// TODO: Cleanup this stuff
-	// private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
+	private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
 
-	// get onmidimessage() {
-	// 	return this._onmidimessage;
-	// }
+	get onmidimessage() {
+		return this._onmidimessage;
+	}
 
 	set onmidimessage(cb: ((this: MIDIInput, ev: Event) => any) | null) {
-		// this._onmidimessage = cb;
-
-		this.addEventListener("midimessage", cb as any);
-
+		this._onmidimessage = cb;
 		if (this.connection !== "open") this.open();
 	}
 }
@@ -213,12 +221,4 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
 
 const access = new TauriMIDIAccess();
 
-// TODO: We could possible just ensure `access` already has data so this can be done while JS is still loading in the webview
-// TODO: and then it only every await's the first time.
-navigator.requestMIDIAccess = () => {
-	// We wait for the next update to ensure we have initialised the inputs and outputs.
-    // This event is emitted regularly by the backend
-    return new Promise((resolve) => access.addEventListener("statechange", () => resolve(access)));
-};
-
-// navigator.requestMIDIAccess = () => Promise.resolve(access);
+navigator.requestMIDIAccess = () => access.ready.then(() => access);

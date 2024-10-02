@@ -1,4 +1,6 @@
 //! A WebMIDI-compatible plugin for Tauri
+//!
+//! Refer to the [init](fn.init.html) function for more information on how to use this plugin or checkout [the example](https://github.com/specta-rs/tauri-plugin-midi/tree/main/example).
 
 use std::{
     collections::BTreeMap,
@@ -182,16 +184,38 @@ fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
         .events(tauri_specta::collect_events![StateChange, MIDIMessage])
 }
 
-/// Initialise the Tauri MIDI plugin
+/// Initialise the plugin which will take care of polyfilling WebMIDI into any Tauri webviews.
 ///
-/// # Example
+/// # Usage
+///
+/// Using this plugin is very simple. Just add it to your Tauri builder:
 ///
 /// ```rust
 ///  tauri::Builder::default()
-///        // Just add this plugin to your Tauri builder
-///        .plugin(tauri_plugin_midi::init());
+///        .plugin(tauri_plugin_midi::init()) // <- This bit here
+/// # ;
 ///        // .... rest of your builder
 /// ```
+///
+/// Then give permissions to the plugin by adding the `midi:default` permissions to your application.
+///
+/// This can be done by modifying the `capabilities/default.json` file:
+/// ```json
+/// {
+///   "$schema": "../gen/schemas/desktop-schema.json",
+///   "identifier": "default",
+///   "description": "Capability for the main window",
+///   "windows": ["main"],
+///   "permissions": ["core:default", "midi:default"] // <- add `midi:default` into here
+/// }
+/// ```
+///
+/// and now you can use the regular [WebMIDI API](https://developer.mozilla.org/en-US/docs/Web/API/Web_MIDI_API) from within your webview.
+///
+/// ## Known issues
+///
+/// - This plugin doesn't work within iframes at the moment. It's being tracked as [#7](https://github.com/specta-rs/tauri-plugin-midi/issues/7)
+///
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     let builder = builder::<R>();
 
