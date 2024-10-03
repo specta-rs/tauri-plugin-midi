@@ -8,7 +8,6 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
 	inputs = new Map<string, TauriMIDIInput>();
 	outputs = new Map<string, TauriMIDIOutput>();
-	ready: Promise<void>;
 
 	onstatechange: ((this: MIDIAccess, ev: Event) => any) | null = null;
 
@@ -28,23 +27,17 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 		super.removeEventListener(type, listener, options);
 	}
 
-	constructor() {
+	constructor(resolve: () => void) {
 		super();
 
-		// TODO: This could be `Promise.withResolvers` when it's stable
-		let resolve: (value: any) => void;
-		this.ready = new Promise((r, reject) => {
-			resolve = r;
-			setTimeout(() => reject(new Error("Failed to initialise WebMIDI")), 10_000);
-		});
-
-		events.stateChange.listen((event: any) => {
+		events.stateChange.listen((event) => {
 			const { inputs, outputs } = event.payload;
 
 			let dirty = false;
 
+			// Delete any disconnected inputs
 			for (const [id, input] of this.inputs) {
-				if (!inputs.includes(id)) {
+				if (!inputs.find(([i, _]) => i === id)) {
 					this.inputs.delete(id);
 					input.state = "disconnected";
 
@@ -52,19 +45,9 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 				}
 			}
 
-			for (const inputName of inputs) {
-				if (this.inputs.has(inputName)) continue;
-
-				const input = new TauriMIDIInput(inputName);
-				input.state = "connected";
-
-				this.inputs.set(inputName, input);
-
-				dirty = true;
-			}
-
+			// Delete any disconnected outputs
 			for (const [id, output] of this.outputs) {
-				if (!outputs.includes(id)) {
+				if (!outputs.find(([i, _]) => i === id)) {
 					this.outputs.delete(id);
 					output.state = "disconnected";
 
@@ -72,19 +55,32 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 				}
 			}
 
-			for (const outputName of outputs) {
-				if (this.outputs.has(outputName)) continue;
+			// Add any new inputs
+			for (const [id, name] of inputs) {
+				if (this.inputs.has(id)) continue;
 
-				const output = new TauriMIDIOutput(outputName);
+				const input = new TauriMIDIInput(id, name);
+				input.state = "connected";
+
+				this.inputs.set(id, input);
+
+				dirty = true;
+			}
+
+			// Add any new outputs
+			for (const [id, name] of outputs) {
+				if (this.outputs.has(id)) continue;
+
+				const output = new TauriMIDIOutput(id, name);
 				output.state = "connected";
 
-				this.outputs.set(outputName, output);
+				this.outputs.set(id, output);
 
 				dirty = true;
 			}
 
 			if (dirty) this.dispatchEvent(new Event("statechange"));
-			resolve(void 0);
+			resolve();
 		});
 	}
 }
@@ -98,12 +94,13 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 	readonly version = null;
 
 	constructor(
+		public identifier: string,
 		public name: string,
 		public readonly type: MIDIPortType,
 	) {
 		super();
-
-		this.id = name;
+		this.id = identifier;
+		// this.name = name; // TODO
 	}
 
 	async open(): Promise<MIDIPort> {
@@ -113,18 +110,19 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 		if (this.state === "disconnected") {
 			this.connection = "pending";
 
-			access.dispatchEvent(new Event("statechange"));
+			(await access).dispatchEvent(new Event("statechange"));
 			this.dispatchEvent(new Event("statechange"));
 
 			return this;
 		}
 
+		console.log("Opening", this.id); // TODO
 		if (this.type === "input") await commands.openInput(this.id);
 		else await commands.openOutput(this.id);
 
 		this.connection = "open";
 
-		access.dispatchEvent(new Event("statechange"));
+		(await access).dispatchEvent(new Event("statechange"));
 		this.dispatchEvent(new Event("statechange"));
 
 		return this;
@@ -138,7 +136,7 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
 		this.connection = "closed";
 
-		access.dispatchEvent(new Event("statechange"));
+		(await access).dispatchEvent(new Event("statechange"));
 		this.dispatchEvent(new Event("statechange"));
 
 		return this;
@@ -157,8 +155,8 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
 }
 
 class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
-	constructor(name: string) {
-		super(name, "input");
+	constructor(id: string, name: string) {
+		super(id, name, "input");
 		this.addEventListener("midimessage", (cb) => {
 			if (this.onmidimessage) this.onmidimessage(cb);
 		});
@@ -171,7 +169,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 			this.stopListening = events.midiMessage.listen((event: any) => {
 				const [inputName, data] = event.payload;
 
-				if (inputName !== this.name) return;
+				if (inputName !== this.id) return;
 
 				this.dispatchEvent(
 					new TauriMIDIMessageEvent("midimessage", {
@@ -202,8 +200,8 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 }
 
 class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
-	constructor(name: string) {
-		super(name, "output");
+	constructor(id: string, name: string) {
+		super(id, name, "output");
 	}
 
 	send(data: number[]) {
@@ -215,10 +213,13 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
 				? this.open()
 				: Promise.resolve();
 
-		p.then(() => commands.outputSend(this.name, data));
+		p.then(() => commands.outputSend(this.id, data));
 	}
 }
 
-const access = new TauriMIDIAccess();
+const access = new Promise<MIDIAccess>((r, reject) => {
+	const access: TauriMIDIAccess = new TauriMIDIAccess(() => r(access));
+	setTimeout(() => reject(new Error("Failed to initialise WebMIDI")), 10_000);
+});
 
-navigator.requestMIDIAccess = () => access.ready.then(() => access);
+navigator.requestMIDIAccess = () => access;

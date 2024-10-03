@@ -20,7 +20,8 @@ rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-midir = "0.9.1"
+# midir = "0.9.1"
+midir = { git = "https://github.com/oscartbeaumont/midir", rev = "e1565c0dc08dd3df8209265d5aaeaaabc98c1de2" }
 serde = "1.0.195"
 specta = "=2.0.0-rc.20"
 tauri = { version = "^2.0.0-rc.16" }
