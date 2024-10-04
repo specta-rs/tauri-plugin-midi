@@ -3,6 +3,7 @@
 		"target": "es2016",
 		"module": "NodeNext",
 		"moduleResolution": "nodenext",
+		"lib": ["ESNext", "DOM"],
 		"noEmit": true,
 		"esModuleInterop": true,
 		"strict": true,

@@ -4,7 +4,7 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, PoisonError},
     thread::spawn,
     time::Duration,
 };
@@ -27,26 +27,32 @@ type State = Arc<Mutex<MidiState>>;
 const PLUGIN_NAME: &str = "midi";
 const RUNTIME_POLYFILL: &str = include_str!("polyfill.js");
 
-fn get_inputs(midi_in: &midir::MidiInput) -> Result<Vec<String>, String> {
+fn get_inputs(midi_in: &midir::MidiInput) -> Result<Vec<(String, String)>, String> {
     midi_in
         .ports()
         .iter()
         .map(|p| {
-            midi_in
-                .port_name(p)
-                .map_err(|e| format!("Failed to get port name: {e}"))
+            Ok((
+                p.id(),
+                midi_in
+                    .port_name(p)
+                    .map_err(|e| format!("Failed to get port name: {e}"))?,
+            ))
         })
         .collect()
 }
 
-fn get_outputs(midi_out: &midir::MidiOutput) -> Result<Vec<String>, String> {
+fn get_outputs(midi_out: &midir::MidiOutput) -> Result<Vec<(String, String)>, String> {
     midi_out
         .ports()
         .iter()
         .map(|p| {
-            midi_out
-                .port_name(p)
-                .map_err(|e| format!("Failed to get port name: {e}"))
+            Ok((
+                p.id(),
+                midi_out
+                    .port_name(p)
+                    .map_err(|e| format!("Failed to get port name: {e}"))?,
+            ))
         })
         .collect()
 }
@@ -54,14 +60,14 @@ fn get_outputs(midi_out: &midir::MidiOutput) -> Result<Vec<String>, String> {
 #[tauri::command(async)]
 #[specta::specta]
 fn open_input<R: tauri::Runtime>(
-    name: String,
+    id: String,
     state: tauri::State<State>,
     app: tauri::AppHandle<R>,
-) {
-    let mut state = state.lock().unwrap();
+) -> Result<(), String> {
+    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
-    if state.input_connections.contains_key(&name) {
-        return;
+    if state.input_connections.contains_key(&id) {
+        return Ok(());
     }
 
     let mut midi_in = MidiInput::new("").unwrap();
@@ -70,102 +76,97 @@ fn open_input<R: tauri::Runtime>(
     let ports = midi_in.ports();
     let port = ports
         .iter()
-        .find(|p| {
-            midi_in
-                .port_name(p)
-                .map(|p_name| p_name == name)
-                .unwrap_or_default()
-        })
-        .expect("Failed to find port");
+        .find(|p| p.id() == id)
+        .ok_or_else(|| format!("Failed to find port by id '{id}'"))?;
 
     let connection = midi_in
         .connect(
             &port,
             "",
             {
-                let name = name.clone();
+                let id = id.clone();
                 move |_, msg, _| {
-                    MIDIMessage(name.to_string(), msg.to_vec())
+                    MIDIMessage(id.to_string(), msg.to_vec())
                         .emit(&app)
                         .unwrap();
                 }
             },
             (),
         )
-        .expect("Failed to open MIDI input");
+        .map_err(|e| format!("Failed to open MIDI input to id '{id}': {e}"))?;
 
-    state.input_connections.insert(name, connection);
+    state.input_connections.insert(id, connection);
+
+    Ok(())
 }
 
 #[tauri::command(async)]
 #[specta::specta]
-fn close_input(name: String, state: tauri::State<State>) {
-    let mut state = state.lock().unwrap();
+fn close_input(id: String, state: tauri::State<State>) {
+    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
-    let Some(connection) = state.input_connections.remove(&name) else {
-        return;
-    };
-
-    connection.close();
+    if let Some(connection) = state.input_connections.remove(&id) {
+        connection.close();
+    }
 }
 
 #[tauri::command(async)]
 #[specta::specta]
-fn open_output(name: String, state: tauri::State<State>) {
-    let mut state = state.lock().unwrap();
+fn open_output(id: String, state: tauri::State<State>) -> Result<(), String> {
+    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
-    if state.output_connections.contains_key(&name) {
-        return;
+    if state.output_connections.contains_key(&id) {
+        return Ok(());
     }
 
-    let midi_out = MidiOutput::new("").unwrap();
+    let midi_out = MidiOutput::new("").map_err(|e| format!("Failed to create MIDI output: {e}"))?;
 
     let ports = midi_out.ports();
     let port = ports
         .iter()
-        .find(|p| {
-            midi_out
-                .port_name(p)
-                .map(|p_name| p_name == name)
-                .unwrap_or_default()
-        })
-        .expect("Failed to find port");
+        .find(|p| p.id() == id)
+        .ok_or_else(|| format!("Failed to find port by id '{id}'"))?;
 
     let connection = midi_out
         .connect(&port, "")
-        .expect("Failed to open MIDI input");
+        .map_err(|e| format!("Failed to open MIDI output to id '{id}': {e}"))?;
 
-    println!("inserting output connection {name}");
-    state.output_connections.insert(name, connection);
+    state.output_connections.insert(id, connection);
+
+    Ok(())
 }
 
 #[tauri::command(async)]
 #[specta::specta]
-fn close_output(name: String, state: tauri::State<State>) {
-    let mut state = state.lock().unwrap();
+fn close_output(id: String, state: tauri::State<State>) {
+    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
-    println!("removing output connection {name}");
-    let Some(connection) = state.output_connections.remove(&name) else {
-        return;
-    };
-
-    connection.close();
+    if let Some(connection) = state.output_connections.remove(&id) {
+        connection.close();
+    }
 }
 
 #[tauri::command(async)]
 #[specta::specta]
-fn output_send(name: String, msg: Vec<u8>, state: tauri::State<State>) {
-    let mut state = state.lock().unwrap();
+fn output_send(id: String, msg: Vec<u8>, state: tauri::State<State>) -> Result<(), String> {
+    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
-    let connection = state.output_connections.get_mut(&name).unwrap();
+    let connection = state
+        .output_connections
+        .get_mut(&id)
+        .ok_or_else(|| format!("Failed to find output connection by name '{id}'"))?;
 
-    connection.send(&msg).unwrap();
+    connection
+        .send(&msg)
+        .map_err(|err| format!("Failed to send MIDI message to port '{id}': {err}"))?;
+
+    Ok(())
 }
 
 #[derive(serde::Serialize, specta::Type, tauri_specta::Event, Clone, Debug)]
 struct StateChange {
-    inputs: Vec<String>,
-    outputs: Vec<String>,
+    inputs: Vec<(String, String)>,
+    outputs: Vec<(String, String)>,
 }
 
 #[derive(serde::Serialize, specta::Type, tauri_specta::Event, Clone)]
@@ -265,6 +266,7 @@ mod test {
     #[test]
     fn export_types() {
         builder::<tauri::Wry>()
+            .error_handling(tauri_specta::ErrorHandlingMode::Throw)
             .export(
                 specta_typescript::Typescript::default(),
                 "./guest-js/bindings.ts",
