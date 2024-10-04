@@ -71,10 +71,18 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
     // Populate and send out the events for the initial state
     this.__tauri_statechange(_inputs, _outputs);
+
+    // Register for events
+    midiInstances.add(this);
+
+    // For some reason the `EventTarget` stuff isn't triggering this correctly.
+    this.addEventListener("statechange", (event) => {
+      if (this.onstatechange) return this.onstatechange(event);
+    });
   }
 
   __tauri_statechange(inputs: [string, string][], outputs: [string, string][]) {
-    let events = [];
+    let events: TauriMIDIConnectionEvent[] = [];
 
     // Delete any disconnected inputs
     for (const [id, input] of this.inputs) {
@@ -128,8 +136,8 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
       );
     }
 
-    console.log("EMITTING", events);
-    events.forEach((event) => this.dispatchEvent(event));
+    // We delay so the consumer has a chance to attach event listeners
+    setTimeout(() => events.forEach((event) => this.dispatchEvent(event)), 0);
   }
 }
 
@@ -160,9 +168,9 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     if (this.state === "disconnected") {
       this.connection = "pending";
 
-      for (const instance of midiInstances) {
-        instance.dispatchEvent(new Event("statechange"));
-      }
+      //   for (const instance of midiInstances) {
+      //     instance.dispatchEvent(new Event("statechange"));
+      //   }
       this.dispatchEvent(new Event("statechange"));
 
       return this;
@@ -173,9 +181,9 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
     this.connection = "open";
 
-    for (const instance of midiInstances) {
-      instance.dispatchEvent(new Event("statechange"));
-    }
+    // for (const instance of midiInstances) {
+    //   instance.dispatchEvent(new Event("statechange"));
+    // }
     this.dispatchEvent(new Event("statechange"));
 
     return this;
@@ -189,9 +197,9 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
     this.connection = "closed";
 
-    for (const instance of midiInstances) {
-      instance.dispatchEvent(new Event("statechange"));
-    }
+    // for (const instance of midiInstances) {
+    //   instance.dispatchEvent(new Event("statechange"));
+    // }
     this.dispatchEvent(new Event("statechange"));
 
     return this;
@@ -216,8 +224,9 @@ globalThis.MIDIMessageEvent = TauriMIDIMessageEvent as any; // TODO
 class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   constructor(id: string, name: string) {
     super(id, name, "input");
-    this.addEventListener("midimessage", (cb) => {
-      if (this.onmidimessage) this.onmidimessage(cb);
+
+    this.addEventListener("midimessage", (event) => {
+      if (this.onmidimessage) return this.onmidimessage(event);
     });
   }
 
@@ -280,9 +289,4 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
 
 globalThis.MIDIOutput = TauriMIDIOutput as any; // TODO
 
-navigator.requestMIDIAccess = () =>
-  ready.then(() => {
-    const access = new TauriMIDIAccess();
-    midiInstances.add(access);
-    return access;
-  });
+navigator.requestMIDIAccess = () => ready.then(() => new TauriMIDIAccess());
