@@ -5,35 +5,20 @@
 
 
 export const commands = {
-async openInput(id: string) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("plugin:midi|open_input", { id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
+async openInput(id: string) : Promise<null> {
+    return await TAURI_INVOKE("plugin:midi|open_input", { id });
 },
 async closeInput(id: string) : Promise<void> {
     await TAURI_INVOKE("plugin:midi|close_input", { id });
 },
-async openOutput(id: string) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("plugin:midi|open_output", { id }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
+async openOutput(id: string) : Promise<null> {
+    return await TAURI_INVOKE("plugin:midi|open_output", { id });
 },
 async closeOutput(id: string) : Promise<void> {
     await TAURI_INVOKE("plugin:midi|close_output", { id });
 },
-async outputSend(id: string, msg: number[]) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("plugin:midi|output_send", { id, msg }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
+async outputSend(id: string, msg: number[]) : Promise<null> {
+    return await TAURI_INVOKE("plugin:midi|output_send", { id, msg });
 }
 }
 

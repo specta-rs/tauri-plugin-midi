@@ -266,7 +266,7 @@ mod test {
     #[test]
     fn export_types() {
         builder::<tauri::Wry>()
-            .error_handling(tauri_specta::ErrorHandlingMode::Result)
+            .error_handling(tauri_specta::ErrorHandlingMode::Throw)
             .export(
                 specta_typescript::Typescript::default(),
                 "./guest-js/bindings.ts",
