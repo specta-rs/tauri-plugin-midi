@@ -3,7 +3,7 @@ name = "tauri-plugin-midi"
 links = "tauri-plugin-midi"
 description = "A WebMIDI-compatible plugin for Tauri"
 license = "MIT"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Brendan Allan", "Oscar Beaumont"]
 edition = "2021"
 rust-version = "1.60"
@@ -20,7 +20,7 @@ rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-midir = "0.9.1"
+midir = "0.10.1"
 serde = "1.0.195"
 specta = "=2.0.0-rc.20"
 tauri = { version = "^2.0.0-rc.16" }
