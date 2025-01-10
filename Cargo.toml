@@ -25,6 +25,7 @@ serde = "1.0.195"
 specta = "=2.0.0-rc.20"
 tauri = { version = "^2.0.0-rc.16" }
 tauri-specta = { version = "=2.0.0-rc.20", features = ["derive"] }
+specta-util = "^0.0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi-hotplug-notification = "0.1.1"
