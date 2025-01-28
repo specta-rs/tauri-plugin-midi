@@ -3,7 +3,7 @@ name = "tauri-plugin-midi"
 links = "tauri-plugin-midi"
 description = "A WebMIDI-compatible plugin for Tauri"
 license = "MIT"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Brendan Allan", "Oscar Beaumont"]
 edition = "2021"
 rust-version = "1.60"
@@ -20,18 +20,18 @@ rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-midir = "0.10.1"
-serde = "1.0.195"
-specta = "=2.0.0-rc.20"
-tauri = { version = "^2.0.0-rc.16" }
-tauri-specta = { version = "=2.0.0-rc.20", features = ["derive"] }
+midir = "0.10"
+serde = "1"
+specta = "=2.0.0-rc.22"
+tauri = { version = "2" }
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi-hotplug-notification = "0.1.1"
 
 [dev-dependencies]
-tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
-specta-typescript = { version = "0.0.7" }
+tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
+specta-typescript = { version = "0.0.9" }
 
 [build-dependencies]
 tauri-plugin = { version = "2.0.0-rc.13", features = ["build"] }
