@@ -219,10 +219,12 @@ fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
 ///
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     let builder = builder::<R>();
+    // Tauri did a breaking change in 2.7.0 so we do this outside to ensure backwards compatibility
+    let polyfill: String = RUNTIME_POLYFILL.into();
 
     Builder::new(PLUGIN_NAME)
         .invoke_handler(builder.invoke_handler())
-        .js_init_script(RUNTIME_POLYFILL.into())
+        .js_init_script(polyfill)
         .setup(move |app, _| {
             app.manage(State::default());
 

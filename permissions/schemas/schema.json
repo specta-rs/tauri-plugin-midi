@@ -49,7 +49,7 @@
           "minimum": 1.0
         },
         "description": {
-          "description": "Human-readable description of what the permission does. Tauri convention is to use <h4> headings in markdown content for Tauri documentation generation purposes.",
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
           "type": [
             "string",
             "null"
@@ -111,7 +111,7 @@
           "type": "string"
         },
         "description": {
-          "description": "Human-readable description of what the permission does. Tauri internal convention is to use <h4> headings in markdown content for Tauri documentation generation purposes.",
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
           "type": [
             "string",
             "null"
@@ -297,57 +297,68 @@
         {
           "description": "Enables the close_input command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-close-input"
+          "const": "allow-close-input",
+          "markdownDescription": "Enables the close_input command without any pre-configured scope."
         },
         {
           "description": "Denies the close_input command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-close-input"
+          "const": "deny-close-input",
+          "markdownDescription": "Denies the close_input command without any pre-configured scope."
         },
         {
           "description": "Enables the close_output command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-close-output"
+          "const": "allow-close-output",
+          "markdownDescription": "Enables the close_output command without any pre-configured scope."
         },
         {
           "description": "Denies the close_output command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-close-output"
+          "const": "deny-close-output",
+          "markdownDescription": "Denies the close_output command without any pre-configured scope."
         },
         {
           "description": "Enables the open_input command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-open-input"
+          "const": "allow-open-input",
+          "markdownDescription": "Enables the open_input command without any pre-configured scope."
         },
         {
           "description": "Denies the open_input command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-open-input"
+          "const": "deny-open-input",
+          "markdownDescription": "Denies the open_input command without any pre-configured scope."
         },
         {
           "description": "Enables the open_output command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-open-output"
+          "const": "allow-open-output",
+          "markdownDescription": "Enables the open_output command without any pre-configured scope."
         },
         {
           "description": "Denies the open_output command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-open-output"
+          "const": "deny-open-output",
+          "markdownDescription": "Denies the open_output command without any pre-configured scope."
         },
         {
           "description": "Enables the output_send command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-output-send"
+          "const": "allow-output-send",
+          "markdownDescription": "Enables the output_send command without any pre-configured scope."
         },
         {
           "description": "Denies the output_send command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-output-send"
+          "const": "deny-output-send",
+          "markdownDescription": "Denies the output_send command without any pre-configured scope."
         },
         {
-          "description": "This permission set configures if your\napplication can use WebMIDI.\n",
+          "description": "This permission set configures if your\napplication can use WebMIDI.\n\n#### This default permission set includes:\n\n- `midi:allow-open-input`\n- `midi:allow-close-input`\n- `midi:allow-open-output`\n- `midi:allow-close-output`\n- `midi:allow-output-send`",
           "type": "string",
-          "const": "default"
+          "const": "default",
+          "markdownDescription": "This permission set configures if your\napplication can use WebMIDI.\n\n#### This default permission set includes:\n\n- `midi:allow-open-input`\n- `midi:allow-close-input`\n- `midi:allow-open-output`\n- `midi:allow-close-output`\n- `midi:allow-output-send`"
         }
       ]
     }

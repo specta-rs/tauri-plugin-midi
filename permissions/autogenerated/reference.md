@@ -3,6 +3,7 @@
 This permission set configures if your
 application can use WebMIDI.
 
+#### This default permission set includes the following:
 
 - `midi:allow-open-input`
 - `midi:allow-close-input`
