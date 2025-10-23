@@ -1,130 +1,528 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <!-- Copied from: https://airtightinteractive.com/demos/webmiditest/ -->
-    <title>Web Midi Test</title>
+    <title>MIDI Timecode Sync Monitor</title>
     <meta charset="utf-8" />
     <meta
       name="description"
-      content="This page shows the simplest possible implementation of handling Web MIDI API Input."
+      content="MIDI Timecode synchronization monitor with delay testing and comprehensive logging."
     />
 
     <style type="text/css">
       body {
-        margin: 40px auto;
-        max-width: 650px;
+        margin: 20px auto;
+        max-width: 1200px;
         line-height: 1.6;
-        font-size: 18px;
-        color: #444;
+        font-size: 14px;
+        color: #333;
         padding: 0 10px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
 
-      h1,
-      h2,
-      h3 {
+      h1, h2, h3 {
         line-height: 1.2;
+        color: #222;
       }
+
+      .container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+
+      .panel {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 20px;
+        background: #f9f9f9;
+      }
+
+      .timecode-display {
+        font-family: 'Courier New', monospace;
+        font-size: 32px;
+        font-weight: bold;
+        text-align: center;
+        padding: 20px;
+        background: #000;
+        color: #0f0;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        letter-spacing: 2px;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: white;
+        border-radius: 4px;
+        border: 1px solid #eee;
+      }
+
+      .status-value {
+        font-weight: bold;
+      }
+
+      .sync-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-left: 8px;
+      }
+
+      .sync-good { background-color: #4CAF50; }
+      .sync-warning { background-color: #FF9800; }
+      .sync-error { background-color: #F44336; }
 
       #midi-log {
         height: 400px;
         overflow: auto;
         border: 1px solid #ccc;
-        padding: 20px;
-        font-family: monospace;
-        font-size: 16px;
-        margin-bottom: 40px;
+        padding: 15px;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        background: #1e1e1e;
+        color: #f0f0f0;
+        border-radius: 8px;
+      }
+
+      .log-timecode { color: #00ff00; }
+      .log-error { color: #ff6b6b; }
+      .log-warning { color: #ffa726; }
+      .log-info { color: #42a5f5; }
+      .log-timestamp { color: #999; }
+
+      .controls {
+        margin-bottom: 20px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      button {
+        padding: 8px 16px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      button:hover {
+        background: #f5f5f5;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .device-selector {
+        margin-bottom: 15px;
+      }
+
+      select {
+        padding: 6px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        font-size: 14px;
+      }
+
+      .stats-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+      }
+
+      .stats-table th,
+      .stats-table td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+      }
+
+      .stats-table th {
+        background: #f5f5f5;
+        font-weight: 600;
       }
     </style>
   </head>
   <body>
-    <h1>Web MIDI API Input Test Page</h1>
+    <h1>MIDI Timecode Sync Monitor</h1>
 
-    <p>
-      This page shows the simplest possible implementation of handling Web MIDI
-      API Input.
-    </p>
+    <div class="controls">
+      <button id="start-btn" onclick="startMonitoring()">Start Monitoring</button>
+      <button id="stop-btn" onclick="stopMonitoring()" disabled>Stop Monitoring</button>
+      <button onclick="clearLog()">Clear Log</button>
+      <button onclick="resetStats()">Reset Stats</button>
+    </div>
 
-    <p>
-      Web MIDI API is supported in all current versions of Chrome and Opera on
-      all OSes. Other browsers require the
-      <a href="https://github.com/cwilso/WebMIDIAPIShim"
-        >Web MIDI API Polyfill</a
-      >.
-    </p>
+    <div class="device-selector">
+      <label for="midi-device-select">MIDI Device: </label>
+      <select id="midi-device-select">
+        <option value="">Select a device...</option>
+      </select>
+    </div>
 
-    <p>To test MIDI Input:</p>
-    <ol>
-      <li>Plug in your MIDI device via USB to your computer.</li>
-      <li>Twiddle some knobs. View received MIDI data below.</li>
-      <li>That's it!</li>
-    </ol>
+    <div class="container">
+      <!-- Timecode Display Panel -->
+      <div class="panel">
+        <h3>Timecode Display</h3>
+        <div class="timecode-display" id="timecode-display">
+          --:--:--:--
+        </div>
 
-    <h2>MIDI Data Log</h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span></span>Sync Status:</span>
+            <span class="status-value" id="sync-status">
+              Disconnected
+              <span class="sync-indicator sync-error"></span>
+            </span>
+          </div>
+          <div class="status-item">
+            <span>Frame Rate:</span>
+            <span class="status-value" id="frame-rate">--</span>
+          </div>
+          <div class="status-item">
+            <span>Last Update:</span>
+            <span class="status-value" id="last-update">Never</span>
+          </div>
+          <div class="status-item">
+            <span>Avg Jitter:</span>
+            <span class="status-value" id="avg-jitter">-- ms</span>
+          </div>
+        </div>
+      </div>
 
+      <!-- Statistics Panel -->
+      <div class="panel">
+        <h3>Sync Statistics</h3>
+        <table class="stats-table">
+          <tr>
+            <th>Metric</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Messages Received</td>
+            <td id="msg-count">0</td>
+          </tr>
+          <tr>
+            <td>Dropped Frames</td>
+            <td id="dropped-frames">0</td>
+          </tr>
+          <tr>
+            <td>Out of Order</td>
+            <td id="out-of-order">0</td>
+          </tr>
+          <tr>
+            <td>Min Delay</td>
+            <td id="min-delay">-- ms</td>
+          </tr>
+          <tr>
+            <td>Max Delay</td>
+            <td id="max-delay">-- ms</td>
+          </tr>
+          <tr>
+            <td>Avg Delay</td>
+            <td id="avg-delay">-- ms</td>
+          </tr>
+          <tr>
+            <td>Jitter (Std Dev)</td>
+            <td id="jitter-stddev">-- ms</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <h3>MIDI Event Log</h3>
     <div id="midi-log"></div>
 
-    <p>
-      View source to see how little JavaScript is required to read MIDI input.
-      Code is adapted from Chris Wilson's
-      <a href="https://github.com/cwilso/WebMIDIAPIShim"
-        >Web MIDI API Polyfill</a
-      >
-      Test Pages.
-    </p>
-    <p>
-      Questions / Comments:
-      <a href="https://twitter.com/felixturner">@felixturner</a>
-    </p>
-
     <script>
-      //Bare minimum JS code to read midi input
-      //Adapted from https://github.com/cwilso/WebMIDIAPIShim
+      let midi = null;
+      let selectedInput = null;
+      let isMonitoring = false;
+      let log = document.getElementById("midi-log");
 
-      var midi;
-      var log = document.getElementById("midi-log");
+      // Timecode tracking
+      let currentTimecode = { hours: 0, minutes: 0, seconds: 0, frames: 0 };
+      let frameRate = 30; // Default frame rate
+      let lastFrameTime = 0;
+      let lastSystemTime = 0;
+
+      // Statistics
+      let stats = {
+        messageCount: 0,
+        droppedFrames: 0,
+        outOfOrder: 0,
+        delays: [],
+        lastFrameNumber: -1,
+        startTime: 0
+      };
+
+      // MTC (MIDI Time Code) quarter frame data
+      let mtcBuffer = new Array(8).fill(0);
+      let mtcFrameCount = 0;
+
       init();
 
       function init() {
-        logText("Initializing MIDI...");
-        navigator.requestMIDIAccess().then(onSuccess, onFailure); //get midi access
+        logMessage("info", "Initializing MIDI...");
+        navigator.requestMIDIAccess({ sysex: true }).then(onMIDISuccess, onMIDIFailure);
       }
 
-      function onSuccess(access) {
+      function onMIDISuccess(access) {
         midi = access;
-        var inputs = midi.inputs;
+        updateDeviceList();
+        logMessage("info", `Found ${midi.inputs.size} MIDI input(s)`);
 
-        logText("Found " + inputs.size + " MIDI input(s)");
+        // Listen for device changes
+        midi.addEventListener('statechange', updateDeviceList);
+      }
 
-        //connect to first device found
-        if (inputs.size > 0) {
-          var iterator = inputs.values(); // returns an iterator that loops over all inputs
-          var input = iterator.next().value; // get the first input
-          logText("Connected first input: " + input.name);
-          input.onmidimessage = handleMIDIMessage;
+      function onMIDIFailure(err) {
+        logMessage("error", `MIDI Init Error: ${err.code} - ${err.message}`);
+      }
+
+      function updateDeviceList() {
+        const select = document.getElementById('midi-device-select');
+        select.innerHTML = '<option value="">Select a device...</option>';
+
+        for (let input of midi.inputs.values()) {
+          const option = document.createElement('option');
+          option.value = input.id;
+          option.textContent = input.name;
+          select.appendChild(option);
         }
       }
 
-      function onFailure(err) {
-        logText("MIDI Init Error. Error code: " + err.code);
+      function startMonitoring() {
+        const select = document.getElementById('midi-device-select');
+        if (!select.value) {
+          alert('Please select a MIDI device first');
+          return;
+        }
+
+        selectedInput = midi.inputs.get(select.value);
+        if (!selectedInput) {
+          logMessage("error", "Selected device not found");
+          return;
+        }
+
+        selectedInput.onmidimessage = handleMIDIMessage;
+        isMonitoring = true;
+        stats.startTime = performance.now();
+
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('stop-btn').disabled = false;
+
+        updateSyncStatus('Connected', 'sync-good');
+        logMessage("info", `Started monitoring: ${selectedInput.name}`);
+      }
+
+      function stopMonitoring() {
+        if (selectedInput) {
+          selectedInput.onmidimessage = null;
+        }
+        isMonitoring = false;
+
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('stop-btn').disabled = true;
+
+        updateSyncStatus('Disconnected', 'sync-error');
+        logMessage("info", "Stopped monitoring");
       }
 
       function handleMIDIMessage(event) {
-        //event.data & event.receivedTime are populated
-        //event.data has 3 components:
-        //0) The device id
-        //1) The controller id
-        //2) The controller value (typically in the range 0 - 127)
+        const data = event.data;
+        const timestamp = event.timeStamp;
+        const delay = performance.now() - timestamp;
 
-        if (event.data.length === 3) {
-          logText(
-            "controller id: " + event.data[1] + ", value: " + event.data[2]
-          );
+        // Log delay for statistics
+        stats.delays.push(delay);
+        if (stats.delays.length > 1000) {
+          stats.delays.shift(); // Keep only last 1000 samples
+        }
+
+        // Check for MIDI Time Code (MTC) Quarter Frame messages (0xF1)
+        if (data[0] === 0xF1) {
+          handleMTCQuarterFrame(data[1], timestamp, delay);
+        }
+        // Check for Full MTC messages (System Exclusive)
+        else if (data[0] === 0xF0 && data.length > 5 && data[1] === 0x7F) {
+          handleFullMTC(data, timestamp, delay);
+        }
+        // Log other MIDI messages
+        else {
+          logMessage("info", `MIDI: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')} (delay: ${delay.toFixed(2)}ms)`);
+        }
+
+        updateStatistics();
+      }
+
+      function handleMTCQuarterFrame(data, timestamp, delay) {
+        const nibbleType = (data >> 4) & 0x07;
+        const nibbleData = data & 0x0F;
+
+        mtcBuffer[nibbleType] = nibbleData;
+
+        logMessage("timecode", `MTC QF: Type ${nibbleType}, Data ${nibbleData} (delay: ${delay.toFixed(2)}ms)`);
+
+        // When we receive nibble type 7, we have a complete frame
+        if (nibbleType === 7) {
+          reconstructTimecode(timestamp);
+          checkFrameSequence();
+          stats.messageCount++;
         }
       }
 
-      function logText(str) {
-        log.innerHTML += str;
-        log.innerHTML += "<br>";
+      function handleFullMTC(data, timestamp, delay) {
+        if (data.length >= 10 && data[3] === 0x01 && data[4] === 0x01) {
+          // Full MTC message format: F0 7F [device] 01 01 [hr] [mn] [sc] [fr] F7
+          const hours = data[5];
+          const minutes = data[6];
+          const seconds = data[7];
+          const frames = data[8];
+
+          // Extract frame rate from hours byte
+          const frameRateCode = (hours >> 5) & 0x03;
+          const frameRates = [24, 25, 29.97, 30];
+          frameRate = frameRates[frameRateCode] || 30;
+
+          currentTimecode = {
+            hours: hours & 0x1F,
+            minutes: minutes,
+            seconds: seconds,
+            frames: frames
+          };
+
+          updateTimecodeDisplay();
+          updateSyncStatus('Synced', 'sync-good');
+
+          logMessage("timecode", `Full MTC: ${formatTimecode(currentTimecode)} @ ${frameRate}fps (delay: ${delay.toFixed(2)}ms)`);
+          stats.messageCount++;
+        }
+      }
+
+      function reconstructTimecode(timestamp) {
+        // Reconstruct timecode from MTC quarter frame buffer
+        currentTimecode.frames = mtcBuffer[0] | (mtcBuffer[1] << 4);
+        currentTimecode.seconds = mtcBuffer[2] | (mtcBuffer[3] << 4);
+        currentTimecode.minutes = mtcBuffer[4] | (mtcBuffer[5] << 4);
+        currentTimecode.hours = mtcBuffer[6] | ((mtcBuffer[7] & 0x01) << 4);
+
+        // Extract frame rate from the upper bits of mtcBuffer[7]
+        const frameRateCode = (mtcBuffer[7] >> 1) & 0x03;
+        const frameRates = [24, 25, 29.97, 30];
+        frameRate = frameRates[frameRateCode] || 30;
+
+        updateTimecodeDisplay();
+        updateSyncStatus('Synced', 'sync-good');
+
+        lastFrameTime = timestamp;
+        lastSystemTime = performance.now();
+      }
+
+      function checkFrameSequence() {
+        const currentFrameNumber = timecodeToFrameNumber(currentTimecode);
+
+        if (stats.lastFrameNumber !== -1) {
+          const expectedFrame = stats.lastFrameNumber + 1;
+
+          if (currentFrameNumber < stats.lastFrameNumber) {
+            stats.outOfOrder++;
+            logMessage("warning", `Out of order frame detected: ${currentFrameNumber} < ${stats.lastFrameNumber}`);
+          } else if (currentFrameNumber > expectedFrame) {
+            const dropped = currentFrameNumber - expectedFrame;
+            stats.droppedFrames += dropped;
+            logMessage("warning", `${dropped} dropped frame(s) detected`);
+          }
+        }
+
+        stats.lastFrameNumber = currentFrameNumber;
+      }
+
+      function timecodeToFrameNumber(tc) {
+        return tc.hours * 3600 * frameRate + tc.minutes * 60 * frameRate + tc.seconds * frameRate + tc.frames;
+      }
+
+      function updateTimecodeDisplay() {
+        document.getElementById('timecode-display').textContent = formatTimecode(currentTimecode);
+        document.getElementById('frame-rate').textContent = `${frameRate} fps`;
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+      }
+
+      function formatTimecode(tc) {
+        return `${tc.hours.toString().padStart(2, '0')}:${tc.minutes.toString().padStart(2, '0')}:${tc.seconds.toString().padStart(2, '0')}:${tc.frames.toString().padStart(2, '0')}`;
+      }
+
+      function updateSyncStatus(status, className) {
+        const statusEl = document.getElementById('sync-status');
+        statusEl.innerHTML = `${status} <span class="sync-indicator ${className}"></span>`;
+      }
+
+      function updateStatistics() {
+        if (stats.delays.length === 0) return;
+
+        const delays = stats.delays;
+        const minDelay = Math.min(...delays);
+        const maxDelay = Math.max(...delays);
+        const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
+
+        // Calculate jitter (standard deviation)
+        const variance = delays.reduce((sum, delay) => sum + Math.pow(delay - avgDelay, 2), 0) / delays.length;
+        const jitter = Math.sqrt(variance);
+
+        document.getElementById('msg-count').textContent = stats.messageCount;
+        document.getElementById('dropped-frames').textContent = stats.droppedFrames;
+        document.getElementById('out-of-order').textContent = stats.outOfOrder;
+        document.getElementById('min-delay').textContent = `${minDelay.toFixed(2)} ms`;
+        document.getElementById('max-delay').textContent = `${maxDelay.toFixed(2)} ms`;
+        document.getElementById('avg-delay').textContent = `${avgDelay.toFixed(2)} ms`;
+        document.getElementById('jitter-stddev').textContent = `${jitter.toFixed(2)} ms`;
+        document.getElementById('avg-jitter').textContent = `${jitter.toFixed(2)} ms`;
+
+        // Update sync status based on jitter
+        if (jitter > 10) {
+          updateSyncStatus('Poor Sync', 'sync-error');
+        } else if (jitter > 5) {
+          updateSyncStatus('Unstable', 'sync-warning');
+        } else if (isMonitoring) {
+          updateSyncStatus('Good Sync', 'sync-good');
+        }
+      }
+
+      function resetStats() {
+        stats = {
+          messageCount: 0,
+          droppedFrames: 0,
+          outOfOrder: 0,
+          delays: [],
+          lastFrameNumber: -1,
+          startTime: performance.now()
+        };
+        updateStatistics();
+        logMessage("info", "Statistics reset");
+      }
+
+      function clearLog() {
+        log.innerHTML = "";
+      }
+
+      function logMessage(type, message) {
+        const timestamp = new Date().toLocaleTimeString();
+        const className = `log-${type}`;
+        log.innerHTML += `<span class="log-timestamp">[${timestamp}]</span> <span class="${className}">${message}</span><br>`;
         log.scrollTop = log.scrollHeight;
       }
     </script>
