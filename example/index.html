@@ -314,6 +314,10 @@
 
         // Listen for device changes
         midi.addEventListener('statechange', updateDeviceList);
+
+        // Set up device selection change handler
+        const select = document.getElementById('midi-device-select');
+        select.addEventListener('change', handleDeviceSelectionChange);
       }
 
       function onMIDIFailure(err) {
@@ -322,13 +326,49 @@
 
       function updateDeviceList() {
         const select = document.getElementById('midi-device-select');
+        const currentValue = select.value; // Preserve current selection if possible
+
+        // Temporarily remove event listener to prevent unwanted change events
+        select.removeEventListener('change', handleDeviceSelectionChange);
+
         select.innerHTML = '<option value="">Select a device...</option>';
 
         for (let input of midi.inputs.values()) {
           const option = document.createElement('option');
           option.value = input.id;
           option.textContent = input.name;
+          if (input.id === currentValue) {
+            option.selected = true;
+          }
           select.appendChild(option);
+        }
+
+        // Re-add event listener after updating options
+        select.addEventListener('change', handleDeviceSelectionChange);
+      }
+
+      function handleDeviceSelectionChange(event) {
+        const newDeviceId = event.target.value;
+        const newDeviceName = event.target.selectedOptions[0]?.textContent || 'Unknown';
+
+        // If monitoring is active, stop it before switching devices
+        if (isMonitoring) {
+          const wasMonitoring = true;
+          logMessage("info", `Switching from ${selectedInput?.name || 'unknown device'} to ${newDeviceName}...`);
+          stopMonitoring();
+
+          // If a new device is selected, start monitoring on it
+          if (newDeviceId) {
+            // Small delay to ensure clean transition and UI update
+            setTimeout(() => {
+              startMonitoring();
+              logMessage("info", `Device switched successfully. Now monitoring: ${newDeviceName}`);
+            }, 150);
+          } else {
+            logMessage("info", "Device deselected. Monitoring stopped.");
+          }
+        } else if (newDeviceId) {
+          logMessage("info", `Device selected: ${newDeviceName}. Press Start to begin monitoring.`);
         }
       }
 
@@ -345,9 +385,11 @@
           return;
         }
 
+        // Reset statistics for fresh monitoring session
+        resetStats();
+
         selectedInput.onmidimessage = handleMIDIMessage;
         isMonitoring = true;
-        stats.startTime = performance.now();
 
         document.getElementById('start-btn').disabled = true;
         document.getElementById('stop-btn').disabled = false;
@@ -359,6 +401,7 @@
       function stopMonitoring() {
         if (selectedInput) {
           selectedInput.onmidimessage = null;
+          selectedInput = null; // Clear reference to prevent stale handlers
         }
         isMonitoring = false;
 
