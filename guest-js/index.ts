@@ -35,7 +35,7 @@ class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
   readonly port: MIDIPort;
 
   constructor(type: string, eventInitDict?: MIDIConnectionEventInit) {
-    super("statechange", eventInitDict);
+    super(type, eventInitDict);
     this.port = (eventInitDict?.port || null)!;
   }
 }
