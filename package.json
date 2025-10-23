@@ -6,7 +6,7 @@
     "build": "tsc --noEmit && esbuild ./guest-js/index.ts --bundle --minify --outfile=src/polyfill.js --platform=browser"
   },
   "devDependencies": {
-    "@tauri-apps/api": "2.0.0-rc.6",
-    "esbuild": "^0.24.0"
+    "@tauri-apps/api": "2.9.0",
+    "esbuild": "^0.25.11"
   }
 }

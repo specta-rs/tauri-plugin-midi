@@ -23,11 +23,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 midir = "0.10"
 serde = "1"
 specta = "=2.0.0-rc.22"
-tauri = { version = "2" }
+tauri = "2"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-coremidi-hotplug-notification = "0.1.1"
+coremidi-hotplug-notification = "0.1.3"
 
 [dev-dependencies]
 tauri-specta = { version = "=2.0.0-rc.21", features = ["typescript"] }
