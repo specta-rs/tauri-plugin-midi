@@ -35,7 +35,7 @@ class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
   readonly port: MIDIPort;
 
   constructor(type: string, eventInitDict?: MIDIConnectionEventInit) {
-    super("statechange", eventInitDict);
+    super(type, eventInitDict);
     this.port = (eventInitDict?.port || null)!;
   }
 }
@@ -215,7 +215,7 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);
 
-    this.data = eventInitDict?.data!;
+    this.data = eventInitDict?.data ?? new Uint8Array(0);
   }
 }
 
@@ -250,7 +250,10 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   }
 
   close() {
-    this.stopListening?.then((cb) => cb());
+    if (this.stopListening) {
+      this.stopListening?.then((cb) => cb());
+      this.stopListening = undefined;
+    }
 
     return super.close();
   }
