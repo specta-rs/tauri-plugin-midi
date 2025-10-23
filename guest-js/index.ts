@@ -250,7 +250,10 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   }
 
   close() {
-    this.stopListening?.then((cb) => cb());
+    if (this.stopListening) {
+      this.stopListening?.then((cb) => cb());
+      this.stopListening = undefined;
+    }
 
     return super.close();
   }
