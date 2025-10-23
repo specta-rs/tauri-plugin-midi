@@ -267,18 +267,44 @@
         outOfOrder: 0,
         delays: [],
         lastFrameNumber: -1,
-        startTime: 0
+        startTime: 0,
+        minDelay: Infinity,
+        maxDelay: -Infinity,
+        delaySum: 0,
+        delaySumSquares: 0
       };
 
       // MTC (MIDI Time Code) quarter frame data
       let mtcBuffer = new Array(8).fill(0);
       let mtcFrameCount = 0;
 
+      // Performance optimization: Throttle UI updates
+      let lastUIUpdate = 0;
+      const UI_UPDATE_INTERVAL = 33; // ~30 FPS for UI updates
+      let pendingUIUpdate = false;
+      let logBuffer = [];
+      const MAX_LOG_ENTRIES = 500; // Limit log entries to prevent memory issues
+      const MAX_DELAY_SAMPLES = 200; // Limit delay samples for performance
+
       init();
 
       function init() {
         logMessage("info", "Initializing MIDI...");
         navigator.requestMIDIAccess({ sysex: true }).then(onMIDISuccess, onMIDIFailure);
+
+        // Start UI update loop
+        requestAnimationFrame(updateUILoop);
+      }
+
+      function updateUILoop() {
+        const now = performance.now();
+        if (now - lastUIUpdate >= UI_UPDATE_INTERVAL && pendingUIUpdate) {
+          updateStatisticsDisplay();
+          flushLogBuffer();
+          pendingUIUpdate = false;
+          lastUIUpdate = now;
+        }
+        requestAnimationFrame(updateUILoop);
       }
 
       function onMIDISuccess(access) {
@@ -348,11 +374,8 @@
         const timestamp = event.timeStamp;
         const delay = performance.now() - timestamp;
 
-        // Log delay for statistics
-        stats.delays.push(delay);
-        if (stats.delays.length > 1000) {
-          stats.delays.shift(); // Keep only last 1000 samples
-        }
+        // Update statistics efficiently
+        updateDelayStats(delay);
 
         // Check for MIDI Time Code (MTC) Quarter Frame messages (0xF1)
         if (data[0] === 0xF1) {
@@ -362,12 +385,29 @@
         else if (data[0] === 0xF0 && data.length > 5 && data[1] === 0x7F) {
           handleFullMTC(data, timestamp, delay);
         }
-        // Log other MIDI messages
+        // Log other MIDI messages (but throttle logging)
         else {
           logMessage("info", `MIDI: ${Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ')} (delay: ${delay.toFixed(2)}ms)`);
         }
 
-        updateStatistics();
+        // Schedule UI update (throttled)
+        pendingUIUpdate = true;
+      }
+
+      function updateDelayStats(delay) {
+        stats.delaySum += delay;
+        stats.delaySumSquares += delay * delay;
+        stats.minDelay = Math.min(stats.minDelay, delay);
+        stats.maxDelay = Math.max(stats.maxDelay, delay);
+
+        // Keep a limited sample of delays for detailed analysis
+        stats.delays.push(delay);
+        if (stats.delays.length > MAX_DELAY_SAMPLES) {
+          const removed = stats.delays.shift();
+          // Adjust running sums when removing old samples
+          stats.delaySum -= removed;
+          stats.delaySumSquares -= removed * removed;
+        }
       }
 
       function handleMTCQuarterFrame(data, timestamp, delay) {
@@ -471,23 +511,23 @@
         statusEl.innerHTML = `${status} <span class="sync-indicator ${className}"></span>`;
       }
 
-      function updateStatistics() {
-        if (stats.delays.length === 0) return;
+      function updateStatisticsDisplay() {
+        if (stats.messageCount === 0) return;
 
-        const delays = stats.delays;
-        const minDelay = Math.min(...delays);
-        const maxDelay = Math.max(...delays);
-        const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
+        const sampleCount = stats.delays.length;
+        if (sampleCount === 0) return;
 
-        // Calculate jitter (standard deviation)
-        const variance = delays.reduce((sum, delay) => sum + Math.pow(delay - avgDelay, 2), 0) / delays.length;
-        const jitter = Math.sqrt(variance);
+        const avgDelay = stats.delaySum / sampleCount;
+
+        // Calculate jitter (standard deviation) efficiently
+        const variance = (stats.delaySumSquares / sampleCount) - (avgDelay * avgDelay);
+        const jitter = Math.sqrt(Math.max(0, variance)); // Ensure non-negative
 
         document.getElementById('msg-count').textContent = stats.messageCount;
         document.getElementById('dropped-frames').textContent = stats.droppedFrames;
         document.getElementById('out-of-order').textContent = stats.outOfOrder;
-        document.getElementById('min-delay').textContent = `${minDelay.toFixed(2)} ms`;
-        document.getElementById('max-delay').textContent = `${maxDelay.toFixed(2)} ms`;
+        document.getElementById('min-delay').textContent = stats.minDelay === Infinity ? '-- ms' : `${stats.minDelay.toFixed(2)} ms`;
+        document.getElementById('max-delay').textContent = stats.maxDelay === -Infinity ? '-- ms' : `${stats.maxDelay.toFixed(2)} ms`;
         document.getElementById('avg-delay').textContent = `${avgDelay.toFixed(2)} ms`;
         document.getElementById('jitter-stddev').textContent = `${jitter.toFixed(2)} ms`;
         document.getElementById('avg-jitter').textContent = `${jitter.toFixed(2)} ms`;
@@ -509,21 +549,55 @@
           outOfOrder: 0,
           delays: [],
           lastFrameNumber: -1,
-          startTime: performance.now()
+          startTime: performance.now(),
+          minDelay: Infinity,
+          maxDelay: -Infinity,
+          delaySum: 0,
+          delaySumSquares: 0
         };
-        updateStatistics();
+        updateStatisticsDisplay();
         logMessage("info", "Statistics reset");
       }
 
       function clearLog() {
         log.innerHTML = "";
+        logBuffer = [];
       }
 
       function logMessage(type, message) {
         const timestamp = new Date().toLocaleTimeString();
         const className = `log-${type}`;
-        log.innerHTML += `<span class="log-timestamp">[${timestamp}]</span> <span class="${className}">${message}</span><br>`;
+        const logEntry = `<span class="log-timestamp">[${timestamp}]</span> <span class="${className}">${message}</span>`;
+
+        // Buffer log messages to avoid excessive DOM manipulation
+        logBuffer.push(logEntry);
+
+        // Limit buffer size to prevent memory issues
+        if (logBuffer.length > MAX_LOG_ENTRIES) {
+          logBuffer.shift();
+        }
+      }
+
+      function flushLogBuffer() {
+        if (logBuffer.length === 0) return;
+
+        // Get current log content
+        let logLines = log.innerHTML.split('<br>').filter(line => line.trim() !== '');
+
+        // Add new entries
+        logLines = logLines.concat(logBuffer);
+
+        // Limit total log size
+        if (logLines.length > MAX_LOG_ENTRIES) {
+          logLines = logLines.slice(-MAX_LOG_ENTRIES);
+        }
+
+        // Update DOM once with all changes
+        log.innerHTML = logLines.join('<br>') + '<br>';
         log.scrollTop = log.scrollHeight;
+
+        // Clear buffer
+        logBuffer = [];
       }
     </script>
   </body>
