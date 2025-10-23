@@ -215,7 +215,7 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);
 
-    this.data = eventInitDict?.data!;
+    this.data = eventInitDict?.data ?? new Uint8Array(0);
   }
 }
 
