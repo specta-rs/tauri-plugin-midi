@@ -285,6 +285,7 @@
       let logBuffer = [];
       const MAX_LOG_ENTRIES = 500; // Limit log entries to prevent memory issues
       const MAX_DELAY_SAMPLES = 200; // Limit delay samples for performance
+      const MAX_MESSAGE_COUNT = 999999; // Cap message count to prevent unbounded growth
 
       init();
 
@@ -353,7 +354,6 @@
 
         // If monitoring is active, stop it before switching devices
         if (isMonitoring) {
-          const wasMonitoring = true;
           logMessage("info", `Switching from ${selectedInput?.name || 'unknown device'} to ${newDeviceName}...`);
           stopMonitoring();
 
@@ -377,6 +377,11 @@
         if (!select.value) {
           alert('Please select a MIDI device first');
           return;
+        }
+
+        // Clear any existing handler before switching
+        if (selectedInput) {
+          selectedInput.onmidimessage = null;
         }
 
         selectedInput = midi.inputs.get(select.value);
@@ -425,7 +430,7 @@
           handleMTCQuarterFrame(data[1], timestamp, delay);
         }
         // Check for Full MTC messages (System Exclusive)
-        else if (data[0] === 0xF0 && data.length > 5 && data[1] === 0x7F) {
+        else if (data[0] === 0xF0 && data.length >= 6 && data[1] === 0x7F && data[data.length - 1] === 0xF7) {
           handleFullMTC(data, timestamp, delay);
         }
         // Log other MIDI messages (but throttle logging)
@@ -465,7 +470,7 @@
         if (nibbleType === 7) {
           reconstructTimecode(timestamp);
           checkFrameSequence();
-          stats.messageCount++;
+          stats.messageCount = Math.min(stats.messageCount + 1, MAX_MESSAGE_COUNT);
         }
       }
 
@@ -493,7 +498,7 @@
           updateSyncStatus('Synced', 'sync-good');
 
           logMessage("timecode", `Full MTC: ${formatTimecode(currentTimecode)} @ ${frameRate}fps (delay: ${delay.toFixed(2)}ms)`);
-          stats.messageCount++;
+          stats.messageCount = Math.min(stats.messageCount + 1, MAX_MESSAGE_COUNT);
         }
       }
 
@@ -505,7 +510,7 @@
         currentTimecode.hours = mtcBuffer[6] | ((mtcBuffer[7] & 0x01) << 4);
 
         // Extract frame rate from the upper bits of mtcBuffer[7]
-        const frameRateCode = (mtcBuffer[7] >> 1) & 0x03;
+        const frameRateCode = (mtcBuffer[7] >> 2) & 0x03;
         const frameRates = [24, 25, 29.97, 30];
         frameRate = frameRates[frameRateCode] || 30;
 
