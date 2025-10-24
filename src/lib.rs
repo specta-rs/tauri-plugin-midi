@@ -179,7 +179,8 @@ fn output_send(
         let tstate = (*tstate).clone();
         tauri::async_runtime::spawn(async move {
             let until = Instant::now()
-                + Duration::from_millis(timestamp)
+                // We take `1ms` for processing overhead
+                + Duration::from_millis(timestamp - 1)
                     .checked_sub(
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
