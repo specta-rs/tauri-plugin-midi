@@ -52,7 +52,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
   addEventListener<K extends keyof MIDIAccessEventMap>(
     type: K,
-    listener: (this: MIDIAccess, ev: MIDIAccessEventMap[K]) => any,
+    listener: EventListenerOrEventListenerObject | null,
     options?: boolean | AddEventListenerOptions
   ) {
     super.addEventListener(type, listener, options);
@@ -60,7 +60,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
 
   removeEventListener<K extends keyof MIDIAccessEventMap>(
     type: K,
-    listener: (this: MIDIAccess, ev: MIDIAccessEventMap[K]) => any,
+    listener: EventListenerOrEventListenerObject | null,
     options?: boolean | EventListenerOptions
   ) {
     super.removeEventListener(type, listener, options);
@@ -210,7 +210,7 @@ globalThis.MIDIPort = TauriMIDIPort as any; // TODO
 
 class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/MIDIMessageEvent/data) */
-  readonly data: Uint8Array;
+  readonly data: Uint8Array<ArrayBuffer>;
 
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);
@@ -234,7 +234,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 
   open() {
     if (!this.stopListening)
-      this.stopListening = events.midiMessage.listen((event: any) => {
+      this.stopListening = events.midiMessage.listen((event) => {
         const [inputName, data] = event.payload;
 
         if (inputName !== this.id) return;

@@ -7,6 +7,7 @@
   },
   "devDependencies": {
     "@tauri-apps/api": "2.9.0",
-    "esbuild": "^0.25.11"
+    "esbuild": "^0.25.11",
+    "typescript": "^5.9.3"
   }
 }
