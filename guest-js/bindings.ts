@@ -17,8 +17,8 @@ async openOutput(id: string) : Promise<null> {
 async closeOutput(id: string) : Promise<void> {
     await TAURI_INVOKE("plugin:midi|close_output", { id });
 },
-async outputSend(id: string, msg: number[]) : Promise<null> {
-    return await TAURI_INVOKE("plugin:midi|output_send", { id, msg });
+async outputSend(id: string, msg: number[], timestamp: string | null) : Promise<null> {
+    return await TAURI_INVOKE("plugin:midi|output_send", { id, msg, timestamp });
 }
 }
 
@@ -39,7 +39,7 @@ stateChange: "plugin:midi:state-change"
 
 /** user-defined types **/
 
-export type MIDIMessage = [string, number[]]
+export type MIDIMessage = [string, string, number[]]
 export type StateChange = { inputs: ([string, string])[]; outputs: ([string, string])[] }
 
 /** tauri-specta globals **/

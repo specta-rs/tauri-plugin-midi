@@ -215,7 +215,7 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);
 
-    this.data = eventInitDict?.data ?? new Uint8Array(0);
+    this.data = eventInitDict?.data ?? new Uint8Array(new ArrayBuffer(0));
   }
 }
 
@@ -235,15 +235,20 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   open() {
     if (!this.stopListening)
       this.stopListening = events.midiMessage.listen((event) => {
-        const [inputName, data] = event.payload;
+        const [inputName, timestampRaw, data] = event.payload;
 
         if (inputName !== this.id) return;
 
-        this.dispatchEvent(
-          new TauriMIDIMessageEvent("midimessage", {
-            data: new Uint8Array(data),
-          })
-        );
+        const timestamp = parseInt(timestampRaw);
+        const midiEvent = new TauriMIDIMessageEvent("midimessage", {
+          data: new Uint8Array(data),
+        });
+
+        Object.defineProperty(midiEvent, 'timeStamp', { value: timestamp });
+        // This is deprecated in spec but we'll keep it anyway for compatibility
+        Object.defineProperty(midiEvent, 'receivedTime', { value: timestamp });
+
+        this.dispatchEvent(midiEvent);
       });
 
     return super.open();
@@ -277,7 +282,7 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
     super(id, name, "output");
   }
 
-  send(data: number[]) {
+  send(data: number[], timestamp?: DOMHighResTimeStamp) {
     if (this.state === "disconnected")
       throw new Error("MIDIOutput is disconnected");
 
@@ -286,7 +291,8 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
         ? this.open()
         : Promise.resolve();
 
-    p.then(() => commands.outputSend(this.id, data));
+    const epoch = timestamp ? Math.trunc(performance.timeOrigin + timestamp): null;
+    p.then(() => commands.outputSend(this.id, data, epoch ? epoch.toString() : null));
   }
 }
 

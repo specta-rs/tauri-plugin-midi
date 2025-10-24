@@ -6,7 +6,7 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex, PoisonError},
     thread::spawn,
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use midir::{MidiInput, MidiOutput};
@@ -15,6 +15,7 @@ use tauri::{
     Manager, Runtime,
 };
 use tauri_specta::Event;
+use tokio::time::sleep_until;
 
 #[derive(Default)]
 struct MidiState {
@@ -60,9 +61,9 @@ fn get_outputs(midi_out: &midir::MidiOutput) -> Result<Vec<(String, String)>, St
 #[tauri::command(async)]
 #[specta::specta]
 fn open_input<R: tauri::Runtime>(
-    id: String,
-    state: tauri::State<State>,
     app: tauri::AppHandle<R>,
+    state: tauri::State<State>,
+    id: String,
 ) -> Result<(), String> {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -86,7 +87,12 @@ fn open_input<R: tauri::Runtime>(
             {
                 let id = id.clone();
                 move |_, msg, _| {
-                    MIDIMessage(id.to_string(), msg.to_vec())
+                    let epoch = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("System time is before epoch")
+                        .as_millis();
+
+                    MIDIMessage(id.to_string(), epoch.to_string(), msg.to_vec())
                         .emit(&app)
                         .unwrap();
                 }
@@ -102,7 +108,7 @@ fn open_input<R: tauri::Runtime>(
 
 #[tauri::command(async)]
 #[specta::specta]
-fn close_input(id: String, state: tauri::State<State>) {
+fn close_input(state: tauri::State<State>, id: String) {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
     if let Some(connection) = state.input_connections.remove(&id) {
@@ -112,7 +118,7 @@ fn close_input(id: String, state: tauri::State<State>) {
 
 #[tauri::command(async)]
 #[specta::specta]
-fn open_output(id: String, state: tauri::State<State>) -> Result<(), String> {
+fn open_output(state: tauri::State<State>, id: String) -> Result<(), String> {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
     if state.output_connections.contains_key(&id) {
@@ -138,7 +144,7 @@ fn open_output(id: String, state: tauri::State<State>) -> Result<(), String> {
 
 #[tauri::command(async)]
 #[specta::specta]
-fn close_output(id: String, state: tauri::State<State>) {
+fn close_output(state: tauri::State<State>, id: String) {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
     if let Some(connection) = state.output_connections.remove(&id) {
@@ -148,17 +154,50 @@ fn close_output(id: String, state: tauri::State<State>) {
 
 #[tauri::command(async)]
 #[specta::specta]
-fn output_send(id: String, msg: Vec<u8>, state: tauri::State<State>) -> Result<(), String> {
-    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+fn output_send(
+    tstate: tauri::State<State>,
+    id: String,
+    msg: Vec<u8>,
+    timestamp: Option<String>,
+) -> Result<(), String> {
+    let timestamp = timestamp
+        .map(|s| {
+            s.parse::<u64>()
+                .map_err(|e| format!("Failed to parse timestamp: {e}"))
+        })
+        .transpose()?;
 
+    let mut state = tstate.lock().unwrap_or_else(PoisonError::into_inner);
     let connection = state
         .output_connections
         .get_mut(&id)
         .ok_or_else(|| format!("Failed to find output connection by name '{id}'"))?;
 
-    connection
-        .send(&msg)
-        .map_err(|err| format!("Failed to send MIDI message to port '{id}': {err}"))?;
+    // TODO: Support this with OS timers properly: https://github.com/Boddlnagg/midir/issues/45
+    if let Some(timestamp) = timestamp {
+        drop(state);
+        let tstate = (*tstate).clone();
+        tauri::async_runtime::spawn(async move {
+            let until = Instant::now()
+                + Duration::from_millis(timestamp)
+                    .checked_sub(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("SystemTime is before epoch"),
+                    )
+                    .unwrap_or(Duration::ZERO);
+            sleep_until(until.into()).await;
+
+            let mut state = tstate.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(connection) = state.output_connections.get_mut(&id) {
+                connection.send(&msg).ok();
+            }
+        });
+    } else {
+        connection
+            .send(&msg)
+            .map_err(|err| format!("Failed to send MIDI message to port '{id}': {err}"))?;
+    }
 
     Ok(())
 }
@@ -170,7 +209,7 @@ struct StateChange {
 }
 
 #[derive(serde::Serialize, specta::Type, tauri_specta::Event, Clone)]
-struct MIDIMessage(String, Vec<u8>);
+struct MIDIMessage(String, String, Vec<u8>);
 
 fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::<R>::new()
