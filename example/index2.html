@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CoreMIDI/Web MIDI Tester</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0b0c10;
+      --fg: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #3b82f6;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --panel: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.12);
+    }
+    body {
+      margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; backdrop-filter: blur(4px); }
+    main { padding: 20px; display: grid; gap: 16px; max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0; font-size: 18px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .card { border: 1px solid var(--border); background: #111418; border-radius: 10px; padding: 14px; }
+    label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 4px; }
+    select, input[type="number"], input[type="text"] {
+      background: #0d1117; border: 1px solid var(--border); color: var(--fg);
+      padding: 8px 10px; border-radius: 8px; min-width: 200px;
+    }
+    button {
+      background: var(--accent); color: white; border: 0; padding: 8px 12px; border-radius: 8px;
+      cursor: pointer; font-weight: 600;
+    }
+    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 6px 10px; border-radius: 8px; background: #0f1620; border: 1px solid var(--border); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 320px; overflow: auto; background: #0b1017; border-radius: 8px; padding: 10px; border: 1px solid var(--border); }
+    .kv { display: grid; grid-template-columns: 200px 1fr; gap: 6px 10px; align-items: center; }
+    .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); background: #0e141b; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .err { color: var(--err); }
+    small { color: var(--muted); }
+    a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="row">
+    <h1>CoreMIDI/Web MIDI Tester</h1>
+    <span id="midiStatus" class="status" title="Web MIDI access state">Not initialized</span>
+    <span id="sysexChip" class="chip" hidden>SysEx: disabled</span>
+    <span class="chip" title="Clock source">Clock: performance.now()</span>
+    <div style="flex:1"></div>
+    <button id="btnInit">Request MIDI Access</button>
+    <button id="btnRescan" class="secondary" disabled>Rescan</button>
+  </header>
+  <main>
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="selInput">Input (receive from):</label>
+          <select id="selInput"></select>
+        </div>
+        <div>
+          <label for="selOutput">Output (send to):</label>
+          <select id="selOutput"></select>
+        </div>
+        <div>
+          <label for="selChannel">MIDI Channel:</label>
+          <select id="selChannel"></select>
+          <small>Use same channel for send and filter (1-16)</small>
+        </div>
+        <div>
+          <label for="chkSysex">SysEx</label>
+          <div class="row">
+            <input id="chkSysex" type="checkbox" />
+            <small>Requires re-requesting access and user approval</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="numFrames">Frames to send</label>
+          <input id="numFrames" type="number" value="200" min="1" max="20000" />
+        </div>
+        <div>
+          <label for="frameSpacing">Frame spacing (ms)</label>
+          <input id="frameSpacing" type="number" value="2" min="0" step="0.1" />
+        </div>
+        <div>
+          <label for="intraSpacing">Intra-frame spacing (ms)</label>
+          <input id="intraSpacing" type="number" value="0.4" min="0" step="0.1" />
+        </div>
+        <div>
+          <label for="timeoutMs">Receive timeout (ms)</label>
+          <input id="timeoutMs" type="number" value="3000" min="0" step="100" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <div class="row">
+            <button id="btnStart" disabled>Start Test</button>
+            <button id="btnStop" class="secondary" disabled>Stop</button>
+            <button id="btnClear" class="secondary">Clear Log</button>
+          </div>
+        </div>
+      </div>
+      <small>
+        This test sends a 4-message frame per index: CC112=125 (marker), CC113=idx_MSB, CC114=idx_LSB, then NoteOn 60 with velocity (idx%100)+1.
+        Select an output and an input connected via a loopback (e.g. IAC Driver on macOS) so messages return to this page.
+      </small>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label>Run Summary</label>
+          <div class="kv">
+            <div>Sent frames</div> <div id="statSent">0</div>
+            <div>Received frames</div> <div id="statRecv">0</div>
+            <div>Missing frames</div> <div id="statMissing">0</div>
+            <div>Duplicates</div> <div id="statDup">0</div>
+            <div>Out-of-order</div> <div id="statOOO">0</div>
+            <div>Min inter-arrival (ms)</div> <div id="statMinIA">–</div>
+            <div>Max inter-arrival (ms)</div> <div id="statMaxIA">–</div>
+            <div>Median inter-arrival (ms)</div> <div id="statMedIA">–</div>
+          </div>
+        </div>
+        <div>
+          <label>Details</label>
+          <div id="resultSummary"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <label>Live Log</label>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <script>
+    // Utility helpers
+    const $ = sel => document.querySelector(sel);
+    const logEl = $('#log');
+    function log(msg) {
+      const ts = new Date().toISOString().split('T')[1].replace('Z','');
+      logEl.textContent += `[${ts}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function setStatus(text, cls) {
+      const el = $('#midiStatus');
+      el.textContent = text;
+      el.classList.remove('ok','warn','err');
+      if (cls) el.classList.add(cls);
+    }
+    function choice(el, items, selectedId) {
+      el.innerHTML = '';
+      for (const it of items) {
+        const opt = document.createElement('option');
+        opt.value = it.value; opt.textContent = it.label;
+        if (selectedId && selectedId === it.value) opt.selected = true;
+        el.appendChild(opt);
+      }
+    }
+    function quantile(arr, q) {
+      if (!arr.length) return NaN;
+      const a = arr.slice().sort((x,y)=>x-y);
+      const pos = (a.length - 1) * q; const base = Math.floor(pos); const rest = pos - base;
+      if (a[base + 1] !== undefined) return a[base] + rest * (a[base+1]-a[base]);
+      return a[base];
+    }
+
+    // Web MIDI state
+    let midi = null; // MIDIAccess
+    let input = null; // MIDIInput
+    let output = null; // MIDIOutput
+    let useSysex = false;
+
+    // Test run state
+    let running = false;
+    let expectedFrames = 0;
+    let startIndex = 0;
+    let recvSeqSet = new Set();
+    let recvSeqOrder = []; // order of unique seqs as received
+    let intraArrival = [];
+    let dupCount = 0;
+    let oooCount = 0;
+    let frameTimeoutHandle = null;
+    let parserState = null;
+
+    function buildChannelList() {
+      const chSel = $('#selChannel');
+      const items = [];
+      for (let i = 1; i <= 16; i++) items.push({ value: String(i), label: `Channel ${i}` });
+      choice(chSel, items, '1');
+    }
+
+    function refreshPortsUI() {
+      const ins = midi ? Array.from(midi.inputs.values()) : [];
+      const outs = midi ? Array.from(midi.outputs.values()) : [];
+      const inputItems = ins.length ? ins.map(p => ({ value: p.id, label: `${p.name} — ${p.manufacturer || 'Unknown'}` })) : [{ value: '', label: 'No inputs' }];
+      const outputItems = outs.length ? outs.map(p => ({ value: p.id, label: `${p.name} — ${p.manufacturer || 'Unknown'}` })) : [{ value: '', label: 'No outputs' }];
+      const prevIn = $('#selInput').value; const prevOut = $('#selOutput').value;
+      choice($('#selInput'), inputItems, prevIn && ins.find(x=>x.id===prevIn) ? prevIn : undefined);
+      choice($('#selOutput'), outputItems, prevOut && outs.find(x=>x.id===prevOut) ? prevOut : undefined);
+      $('#btnStart').disabled = !(ins.length && outs.length);
+      $('#btnRescan').disabled = !midi;
+    }
+
+    async function requestAccess() {
+      try {
+        useSysex = $('#chkSysex').checked;
+        setStatus('Requesting access…', 'warn');
+        midi = await navigator.requestMIDIAccess({ sysex: useSysex });
+        midi.onstatechange = (e) => {
+          log(`Port state: ${e.port.type} '${e.port.name}' ${e.port.state}/${e.port.connection}`);
+          refreshPortsUI();
+        };
+        setStatus('MIDI access granted', 'ok');
+        $('#sysexChip').hidden = false; $('#sysexChip').textContent = `SysEx: ${useSysex ? 'enabled' : 'disabled'}`;
+        refreshPortsUI();
+        $('#btnStart').disabled = !(midi.inputs.size && midi.outputs.size);
+        $('#btnRescan').disabled = false;
+      } catch (err) {
+        console.error(err);
+        setStatus('MIDI access denied', 'err');
+        log('Failed to get MIDI access: ' + err);
+      }
+    }
+
+    function connectSelectedPorts() {
+      if (!midi) return;
+      const inId = $('#selInput').value;
+      const outId = $('#selOutput').value;
+      input = inId ? midi.inputs.get(inId) : null;
+      output = outId ? midi.outputs.get(outId) : null;
+      log(`Selected input: ${input ? input.name : '—'}, output: ${output ? output.name : '—'}`);
+    }
+
+    function msgLen(status) {
+      if (status >= 0x80 && status <= 0xEF) {
+        const hi = status & 0xF0;
+        // Note Off/On/AT/CC/PB: 3 bytes; Program Change/Channel Pressure: 2 bytes
+        if (hi === 0xC0 || hi === 0xD0) return 2;
+        return 3;
+      }
+      // System Common/Real-Time
+      if (status >= 0xF8) return 1; // real-time single bytes
+      if (status === 0xF6) return 1; // Tune Request
+      if (status === 0xF1 || status === 0xF3) return 2; // Time Code, Song Select
+      if (status === 0xF2) return 3; // Song Position
+      return 1; // Treat others as 1 for safety (SysEx handled by not using here)
+    }
+
+    function splitMessages(bytes) {
+      const out = [];
+      let i = 0; let runningStatus = null;
+      while (i < bytes.length) {
+        let status = bytes[i];
+        if (status < 0x80) {
+          // Running status: reuse previous status
+          if (runningStatus == null) { i++; continue; }
+          status = runningStatus; // do not consume i here
+        } else {
+          runningStatus = (status < 0xF0) ? status : null; // running status only for channel messages
+          i++;
+        }
+        const len = msgLen(status);
+        const data = [status];
+        if (len > 1) { data.push(bytes[i] ?? 0); i++; }
+        if (len > 2) { data.push(bytes[i] ?? 0); i++; }
+        out.push(data);
+      }
+      return out;
+    }
+
+    function channelOf(status) { return status & 0x0F; }
+    function typeOf(status) { return status & 0xF0; }
+
+    function resetRunState() {
+      recvSeqSet = new Set();
+      recvSeqOrder = [];
+      intraArrival = [];
+      dupCount = 0; oooCount = 0;
+      parserState = { stage: 0, msb: 0, lsb: 0, lastTs: NaN };
+      updateStats();
+    }
+
+    function updateStats() {
+      $('#statSent').textContent = String(expectedFrames);
+      const recv = recvSeqSet.size;
+      $('#statRecv').textContent = String(recv);
+      const missing = Math.max(0, expectedFrames - recv);
+      $('#statMissing').textContent = String(missing);
+      $('#statDup').textContent = String(dupCount);
+      $('#statOOO').textContent = String(oooCount);
+      const minIA = intraArrival.length ? Math.min(...intraArrival) : NaN;
+      const maxIA = intraArrival.length ? Math.max(...intraArrival) : NaN;
+      const medIA = intraArrival.length ? quantile(intraArrival, 0.5) : NaN;
+      $('#statMinIA').textContent = Number.isFinite(minIA) ? minIA.toFixed(3) : '–';
+      $('#statMaxIA').textContent = Number.isFinite(maxIA) ? maxIA.toFixed(3) : '–';
+      $('#statMedIA').textContent = Number.isFinite(medIA) ? medIA.toFixed(3) : '–';
+    }
+
+    function handleIncomingFrame(seq, t) {
+      if (recvSeqSet.has(seq)) { dupCount++; }
+      else {
+        // order check
+        if (recvSeqOrder.length && seq !== (recvSeqOrder[recvSeqOrder.length-1] + 1)) {
+          oooCount++;
+        }
+        recvSeqSet.add(seq);
+        recvSeqOrder.push(seq);
+        // inter-arrival
+        if (!Number.isNaN(parserState.lastTs)) {
+          intraArrival.push(t - parserState.lastTs);
+        }
+        parserState.lastTs = t;
+      }
+      updateStats();
+    }
+
+    function processIncomingBytes(bytes, timeStamp) {
+      const msgs = splitMessages(bytes);
+      const selCh = (parseInt($('#selChannel').value, 10) - 1) & 0x0F;
+      for (const m of msgs) {
+        const st = m[0];
+        const ty = typeOf(st);
+        if ((st & 0xF0) < 0x80) continue; // ignore stray data
+        if (channelOf(st) !== selCh) continue; // filter by channel
+        if (ty === 0xB0) {
+          const cc = m[1]; const val = m[2] ?? 0;
+          if (parserState.stage === 0 && cc === 112 && val === 125) {
+            parserState.stage = 1; // saw marker
+          } else if (parserState.stage === 1 && cc === 113) {
+            parserState.msb = val & 0x7F; parserState.stage = 2;
+          } else if (parserState.stage === 2 && cc === 114) {
+            parserState.lsb = val & 0x7F; parserState.stage = 3;
+          } else {
+            // unrelated CC; reset if we were in-progress
+            parserState.stage = 0;
+          }
+        } else if (ty === 0x90) { // Note On
+          const note = m[1]; const vel = m[2] || 0;
+          if (parserState.stage === 3 && note === 60 && vel > 0) {
+            const seq = ((parserState.msb << 7) | parserState.lsb) >>> 0;
+            handleIncomingFrame(seq, timeStamp);
+          }
+          parserState.stage = 0; // reset after note
+        } else {
+          // Ignore other types for the frame protocol
+        }
+      }
+    }
+
+    function attachInputListener() {
+      if (!input) return;
+      input.onmidimessage = (e) => {
+        processIncomingBytes(e.data, e.receivedTime || e.timeStamp || performance.now());
+      };
+    }
+
+    function detachInputListener() {
+      if (input) input.onmidimessage = null;
+    }
+
+    function sendTestSequence() {
+      if (!output) { log('No output selected'); return; }
+      const frames = expectedFrames;
+      const ch = ((parseInt($('#selChannel').value, 10) - 1) & 0x0F) >>> 0;
+      const statusCC = 0xB0 | ch;
+      const statusNoteOn = 0x90 | ch;
+      const now = performance.now();
+      const frameSpacingMs = parseFloat($('#frameSpacing').value) || 0;
+      const intraMs = parseFloat($('#intraSpacing').value) || 0;
+
+      for (let i = 0; i < frames; i++) {
+        const t0 = now + i * frameSpacingMs;
+        // CC 112 marker 125 (0x7D)
+        output.send([statusCC, 112, 125], t0 + 0);
+        // CC 113 MSB
+        output.send([statusCC, 113, (i >> 7) & 0x7F], t0 + intraMs);
+        // CC 114 LSB
+        output.send([statusCC, 114, i & 0x7F], t0 + 2*intraMs);
+        // Note On 60 velocity
+        const vel = (i % 100) + 1;
+        output.send([statusNoteOn, 60, vel], t0 + 3*intraMs);
+      }
+      log(`Scheduled ${frames} frames over ${(frames*frameSpacingMs).toFixed(1)} ms`);
+    }
+
+    function finishRun(reason) {
+      if (!running) return;
+      running = false;
+      clearTimeout(frameTimeoutHandle);
+      $('#btnStart').disabled = false;
+      $('#btnStop').disabled = true;
+      const missing = Math.max(0, expectedFrames - recvSeqSet.size);
+      const ok = missing === 0 && dupCount === 0 && oooCount === 0;
+      const result = ok ? 'PASS' : 'FAIL';
+      const color = ok ? 'ok' : 'err';
+      log(`${result}: ${expectedFrames} sent, ${recvSeqSet.size} received, missing=${missing}, dup=${dupCount}, ooo=${oooCount}. ${reason || ''}`.trim());
+      const summary = `Result: <span class="${color}">${result}</span><br/>` +
+        `Sent=${expectedFrames}, Received=${recvSeqSet.size}, Missing=${missing}, Duplicates=${dupCount}, OutOfOrder=${oooCount}`;
+      $('#resultSummary').innerHTML = summary;
+    }
+
+    function startRun() {
+      if (!midi) { log('Call Request MIDI Access first.'); return; }
+      connectSelectedPorts();
+      if (!input || !output) { log('Select both input and output ports.'); return; }
+      expectedFrames = Math.max(1, Math.min(20000, parseInt($('#numFrames').value, 10) || 1));
+      resetRunState();
+      running = true;
+      $('#btnStart').disabled = true;
+      $('#btnStop').disabled = false;
+      attachInputListener();
+      log('Starting run… Ensure your output routes back to the selected input (e.g., IAC Driver loopback).');
+      // Give the input a moment to attach before sending
+      setTimeout(() => {
+        sendTestSequence();
+        const timeoutMs = Math.max(0, parseInt($('#timeoutMs').value, 10) || 0);
+        frameTimeoutHandle = setTimeout(() => finishRun('Timed out waiting for remaining frames'), timeoutMs);
+      }, 20);
+    }
+
+    function stopRun() { finishRun('Stopped by user'); }
+
+    function clearLog() { logEl.textContent = ''; }
+
+    // Wire up UI
+    $('#btnInit').addEventListener('click', requestAccess);
+    $('#btnRescan').addEventListener('click', refreshPortsUI);
+    $('#selInput').addEventListener('change', connectSelectedPorts);
+    $('#selOutput').addEventListener('change', connectSelectedPorts);
+    $('#selChannel').addEventListener('change', () => {});
+    $('#btnStart').addEventListener('click', startRun);
+    $('#btnStop').addEventListener('click', stopRun);
+    $('#btnClear').addEventListener('click', clearLog);
+
+    // Initialize dropdowns
+    buildChannelList();
+
+    // Environment hints
+    if (!('requestMIDIAccess' in navigator)) {
+      setStatus('Web MIDI not supported in this browser', 'err');
+      log('Web MIDI API not available. Try Chrome, Edge, or Safari with proper flags.');
+    } else {
+      setStatus('Ready. Click "Request MIDI Access" to begin.', 'warn');
+    }
+
+    // Guidance
+    log('Welcome! This page tests CoreMIDI via the Web MIDI API.');
+    log('1) Click "Request MIDI Access".');
+    log('2) Pick an Output and an Input that are connected (use macOS IAC Driver for loopback).');
+    log('3) Click "Start Test" to send structured frames and verify ordering and drops.');
+  </script>
+</body>
+</html>

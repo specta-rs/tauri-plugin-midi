@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI Message Tester - 100 Messages</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+    }
+    .controls {
+      margin: 20px 0;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 4px;
+    }
+    .row {
+      display: flex;
+      gap: 20px;
+      margin: 10px 0;
+      align-items: center;
+    }
+    .row label {
+      min-width: 120px;
+      font-weight: bold;
+    }
+    select, button {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      min-width: 120px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .status.ok { background: #d4edda; color: #155724; }
+    .status.warn { background: #fff3cd; color: #856404; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    .results {
+      margin: 20px 0;
+      padding: 15px;
+      background: #f8f9fa;
+      border-left: 4px solid #007bff;
+    }
+    .log {
+      background: #000;
+      color: #00ff00;
+      padding: 15px;
+      border-radius: 4px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 15px 0;
+    }
+    .stat-item {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+      border: 1px solid #ddd;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #007bff;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>MIDI Message Tester</h1>
+    <p>This tester sends 100 MIDI messages and verifies they are received correctly using the Web MIDI API.</p>
+
+    <div class="controls">
+      <div class="row">
+        <label for="inputSelect">MIDI Input:</label>
+        <select id="inputSelect">
+          <option value="">Select MIDI Input...</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="outputSelect">MIDI Output:</label>
+        <select id="outputSelect">
+          <option value="">Select MIDI Output...</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="channelSelect">MIDI Channel:</label>
+        <select id="channelSelect">
+          <option value="0">Channel 1</option>
+          <option value="1">Channel 2</option>
+          <option value="2">Channel 3</option>
+          <option value="3">Channel 4</option>
+          <option value="4">Channel 5</option>
+          <option value="5">Channel 6</option>
+          <option value="6">Channel 7</option>
+          <option value="7">Channel 8</option>
+          <option value="8">Channel 9</option>
+          <option value="9">Channel 10</option>
+          <option value="10">Channel 11</option>
+          <option value="11">Channel 12</option>
+          <option value="12">Channel 13</option>
+          <option value="13">Channel 14</option>
+          <option value="14">Channel 15</option>
+          <option value="15">Channel 16</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="requestAccessBtn">Request MIDI Access</button>
+        <button id="startTestBtn" disabled>Start Test</button>
+        <button id="stopTestBtn" disabled>Stop Test</button>
+        <button id="clearLogBtn">Clear Log</button>
+      </div>
+    </div>
+
+    <div class="status" id="statusDiv">Click "Request MIDI Access" to begin</div>
+
+    <div class="results">
+      <h3>Test Results</h3>
+      <div class="stats">
+        <div class="stat-item">
+          <div class="stat-value" id="sentCount">0</div>
+          <div class="stat-label">Messages Sent</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="receivedCount">0</div>
+          <div class="stat-label">Messages Received</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="missingCount">0</div>
+          <div class="stat-label">Missing</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="outOfOrderCount">0</div>
+          <div class="stat-label">Out of Order</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="duplicateCount">0</div>
+          <div class="stat-label">Duplicates</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="testResult">-</div>
+          <div class="stat-label">Test Result</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="log" id="logDiv"></div>
+  </div>
+
+  <script>
+    // Global variables
+    let midiAccess = null;
+    let selectedInput = null;
+    let selectedOutput = null;
+    let isTestRunning = false;
+    let testStartTime = null;
+
+    // Test state
+    let messagesSent = 0;
+    let messagesReceived = new Set();
+    let receivedOrder = [];
+    let duplicates = 0;
+    let outOfOrder = 0;
+    let expectedSequence = 0;
+
+    // DOM elements
+    const statusDiv = document.getElementById('statusDiv');
+    const logDiv = document.getElementById('logDiv');
+    const inputSelect = document.getElementById('inputSelect');
+    const outputSelect = document.getElementById('outputSelect');
+    const channelSelect = document.getElementById('channelSelect');
+    const requestAccessBtn = document.getElementById('requestAccessBtn');
+    const startTestBtn = document.getElementById('startTestBtn');
+    const stopTestBtn = document.getElementById('stopTestBtn');
+    const clearLogBtn = document.getElementById('clearLogBtn');
+
+    // Stat elements
+    const sentCountEl = document.getElementById('sentCount');
+    const receivedCountEl = document.getElementById('receivedCount');
+    const missingCountEl = document.getElementById('missingCount');
+    const outOfOrderCountEl = document.getElementById('outOfOrderCount');
+    const duplicateCountEl = document.getElementById('duplicateCount');
+    const testResultEl = document.getElementById('testResult');
+
+    // Utility functions
+    function log(message) {
+      const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
+      logDiv.textContent += `[${timestamp}] ${message}\n`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function setStatus(message, type = '') {
+      statusDiv.textContent = message;
+      statusDiv.className = `status ${type}`;
+    }
+
+    function updateStats() {
+      sentCountEl.textContent = messagesSent;
+      receivedCountEl.textContent = messagesReceived.size;
+      missingCountEl.textContent = Math.max(0, messagesSent - messagesReceived.size);
+      outOfOrderCountEl.textContent = outOfOrder;
+      duplicateCountEl.textContent = duplicates;
+
+      if (messagesSent === 100 && !isTestRunning) {
+        const allReceived = messagesReceived.size === 100;
+        const noMissing = messagesReceived.size === messagesSent;
+        testResultEl.textContent = (allReceived && noMissing) ? 'PASS' : 'FAIL';
+        testResultEl.style.color = (allReceived && noMissing) ? '#28a745' : '#dc3545';
+      }
+    }
+
+    function populatePortSelects() {
+      // Clear existing options
+      inputSelect.innerHTML = '<option value="">Select MIDI Input...</option>';
+      outputSelect.innerHTML = '<option value="">Select MIDI Output...</option>';
+
+      if (!midiAccess) return;
+
+      // Populate inputs
+      for (const input of midiAccess.inputs.values()) {
+        const option = document.createElement('option');
+        option.value = input.id;
+        option.textContent = `${input.name} (${input.manufacturer || 'Unknown'})`;
+        inputSelect.appendChild(option);
+      }
+
+      // Populate outputs
+      for (const output of midiAccess.outputs.values()) {
+        const option = document.createElement('option');
+        option.value = output.id;
+        option.textContent = `${output.name} (${output.manufacturer || 'Unknown'})`;
+        outputSelect.appendChild(option);
+      }
+
+      log(`Found ${midiAccess.inputs.size} MIDI inputs and ${midiAccess.outputs.size} MIDI outputs`);
+    }
+
+    function resetTestState() {
+      messagesSent = 0;
+      messagesReceived.clear();
+      receivedOrder = [];
+      duplicates = 0;
+      outOfOrder = 0;
+      expectedSequence = 0;
+      testStartTime = null;
+      updateStats();
+      testResultEl.textContent = '-';
+      testResultEl.style.color = '#007bff';
+    }
+
+    function handleMIDIMessage(event) {
+      if (!isTestRunning) return;
+
+      const data = event.data;
+      const timestamp = event.timeStamp || performance.now();
+
+      // Check if this is our test message (Note On, channel match, note 60)
+      const channel = parseInt(channelSelect.value);
+      const expectedStatus = 0x90 + channel; // Note On + channel
+
+      if (data.length >= 3 && data[0] === expectedStatus && data[1] === 60) {
+        const messageId = data[2]; // Use velocity as message ID (1-100)
+
+        if (messagesReceived.has(messageId)) {
+          duplicates++;
+          log(`Duplicate message received: #${messageId}`);
+        } else {
+          messagesReceived.add(messageId);
+          receivedOrder.push(messageId);
+
+          // Check if message is out of order (but don't fail the test)
+          if (messageId !== expectedSequence + 1) {
+            outOfOrder++;
+            log(`Out of order message: expected #${expectedSequence + 1}, got #${messageId}`);
+          }
+          expectedSequence = Math.max(expectedSequence, messageId);
+        }
+
+        updateStats();
+
+        // Check if we've received all 100 messages
+        if (messagesReceived.size === 100) {
+          stopTest('All messages received!');
+        }
+      }
+    }
+
+    async function requestMIDIAccess() {
+      try {
+        setStatus('Requesting MIDI access...', 'warn');
+        midiAccess = await navigator.requestMIDIAccess();
+
+        midiAccess.onstatechange = (event) => {
+          log(`MIDI port ${event.port.state}: ${event.port.name}`);
+          populatePortSelects();
+        };
+
+        populatePortSelects();
+        setStatus('MIDI access granted', 'ok');
+        requestAccessBtn.disabled = true;
+        log('MIDI access granted successfully');
+
+      } catch (error) {
+        setStatus('MIDI access denied', 'error');
+        log(`Failed to get MIDI access: ${error.message}`);
+      }
+    }
+
+    function setupInputListener() {
+      if (selectedInput) {
+        selectedInput.onmidimessage = null;
+      }
+
+      const inputId = inputSelect.value;
+      if (inputId && midiAccess) {
+        selectedInput = midiAccess.inputs.get(inputId);
+        if (selectedInput) {
+          selectedInput.onmidimessage = handleMIDIMessage;
+          log(`Input listener attached to: ${selectedInput.name}`);
+        }
+      }
+    }
+
+    function setupOutput() {
+      const outputId = outputSelect.value;
+      if (outputId && midiAccess) {
+        selectedOutput = midiAccess.outputs.get(outputId);
+        if (selectedOutput) {
+          log(`Output selected: ${selectedOutput.name}`);
+        }
+      }
+    }
+
+    async function startTest() {
+      if (!selectedInput || !selectedOutput) {
+        setStatus('Please select both input and output ports', 'error');
+        return;
+      }
+
+      isTestRunning = true;
+      testStartTime = performance.now();
+      resetTestState();
+
+      startTestBtn.disabled = true;
+      stopTestBtn.disabled = false;
+
+      setStatus('Test running...', 'warn');
+      log('Starting test: sending 100 MIDI messages...');
+      log('Note: Messages being out of order will be logged but won\'t fail the test');
+
+      const channel = parseInt(channelSelect.value);
+      const noteOnStatus = 0x90 + channel; // Note On + channel
+      const note = 60; // Middle C
+
+      // Send 100 messages with unique velocities (1-100) without using timestamp parameter
+      for (let i = 1; i <= 100; i++) {
+        const velocity = i; // Use message number as velocity for identification
+        const message = [noteOnStatus, note, velocity];
+
+        // Send without timestamp to let the system handle timing
+        selectedOutput.send(message);
+        messagesSent++;
+
+        // Small delay to prevent overwhelming the system
+        if (i % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1));
+        }
+      }
+
+      updateStats();
+      log(`Sent ${messagesSent} MIDI messages`);
+
+      // Set a timeout to stop the test if not all messages are received
+      setTimeout(() => {
+        if (isTestRunning) {
+          stopTest('Test timeout - not all messages received');
+        }
+      }, 5000); // 5 second timeout
+    }
+
+    function stopTest(reason = 'Test stopped by user') {
+      if (!isTestRunning) return;
+
+      isTestRunning = false;
+      startTestBtn.disabled = false;
+      stopTestBtn.disabled = true;
+
+      const testDuration = testStartTime ? (performance.now() - testStartTime).toFixed(2) : 'unknown';
+      const success = messagesReceived.size === 100;
+
+      setStatus(success ? 'Test completed successfully' : 'Test completed with issues', success ? 'ok' : 'error');
+
+      log(`\nTest completed: ${reason}`);
+      log(`Duration: ${testDuration}ms`);
+      log(`Messages sent: ${messagesSent}`);
+      log(`Messages received: ${messagesReceived.size}`);
+      log(`Missing messages: ${Math.max(0, messagesSent - messagesReceived.size)}`);
+      log(`Out of order messages: ${outOfOrder}`);
+      log(`Duplicate messages: ${duplicates}`);
+      log(`Result: ${success ? 'PASS' : 'FAIL'}`);
+
+      if (outOfOrder > 0) {
+        log(`Note: ${outOfOrder} messages were received out of order but this doesn't affect the pass/fail result`);
+      }
+
+      updateStats();
+    }
+
+    function clearLog() {
+      logDiv.textContent = '';
+    }
+
+    // Event listeners
+    requestAccessBtn.addEventListener('click', requestMIDIAccess);
+    startTestBtn.addEventListener('click', startTest);
+    stopTestBtn.addEventListener('click', () => stopTest());
+    clearLogBtn.addEventListener('click', clearLog);
+
+    inputSelect.addEventListener('change', () => {
+      setupInputListener();
+      const canStart = inputSelect.value && outputSelect.value && midiAccess;
+      startTestBtn.disabled = !canStart || isTestRunning;
+    });
+
+    outputSelect.addEventListener('change', () => {
+      setupOutput();
+      const canStart = inputSelect.value && outputSelect.value && midiAccess;
+      startTestBtn.disabled = !canStart || isTestRunning;
+    });
+
+    // Initial setup
+    if (!navigator.requestMIDIAccess) {
+      setStatus('Web MIDI API not supported in this browser', 'error');
+      log('Web MIDI API not supported. Please use Chrome, Edge, or Safari with MIDI support enabled.');
+      requestAccessBtn.disabled = true;
+    } else {
+      log('MIDI Message Tester loaded');
+      log('Instructions:');
+      log('1. Click "Request MIDI Access"');
+      log('2. Select MIDI Input and Output ports (use loopback connection)');
+      log('3. Choose MIDI channel');
+      log('4. Click "Start Test" to send 100 messages and verify receipt');
+      log('5. Out-of-order messages will be logged but won\'t fail the test');
+    }
+  </script>
+</body>
+</html>

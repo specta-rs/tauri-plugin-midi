@@ -1,467 +1,735 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CoreMIDI/Web MIDI Tester</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #0b0c10;
-      --fg: #e5e7eb;
-      --muted: #9ca3af;
-      --accent: #3b82f6;
-      --ok: #10b981;
-      --warn: #f59e0b;
-      --err: #ef4444;
-      --panel: rgba(255,255,255,0.04);
-      --border: rgba(255,255,255,0.12);
-    }
-    body {
-      margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
-      background: var(--bg); color: var(--fg);
-    }
-    header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; backdrop-filter: blur(4px); }
-    main { padding: 20px; display: grid; gap: 16px; max-width: 1100px; margin: 0 auto; }
-    h1 { margin: 0; font-size: 18px; }
-    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-    .card { border: 1px solid var(--border); background: #111418; border-radius: 10px; padding: 14px; }
-    label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 4px; }
-    select, input[type="number"], input[type="text"] {
-      background: #0d1117; border: 1px solid var(--border); color: var(--fg);
-      padding: 8px 10px; border-radius: 8px; min-width: 200px;
-    }
-    button {
-      background: var(--accent); color: white; border: 0; padding: 8px 12px; border-radius: 8px;
-      cursor: pointer; font-weight: 600;
-    }
-    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .status { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 6px 10px; border-radius: 8px; background: #0f1620; border: 1px solid var(--border); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 320px; overflow: auto; background: #0b1017; border-radius: 8px; padding: 10px; border: 1px solid var(--border); }
-    .kv { display: grid; grid-template-columns: 200px 1fr; gap: 6px 10px; align-items: center; }
-    .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); background: #0e141b; }
-    .ok { color: var(--ok); }
-    .warn { color: var(--warn); }
-    .err { color: var(--err); }
-    small { color: var(--muted); }
-    a { color: var(--accent); text-decoration: none; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIDI Timestamp Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        h2 {
+            color: #555;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        select, input, button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        button.stop {
+            background-color: #dc3545;
+        }
+        button.stop:hover {
+            background-color: #c82333;
+        }
+        button.clear {
+            background-color: #6c757d;
+        }
+        button.clear:hover {
+            background-color: #545b62;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .results {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+            border-left: 4px solid #007bff;
+        }
+        .metric.error {
+            border-left-color: #dc3545;
+        }
+        .metric.warning {
+            border-left-color: #ffc107;
+        }
+        .metric.success {
+            border-left-color: #28a745;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .log {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .timestamp-chart {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .chart-bar {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            font-size: 12px;
+        }
+        .chart-label {
+            width: 100px;
+            flex-shrink: 0;
+        }
+        .chart-value {
+            flex: 1;
+            height: 20px;
+            background: linear-gradient(90deg, #28a745 0%, #ffc107 50%, #dc3545 100%);
+            margin: 0 10px;
+            border-radius: 2px;
+            position: relative;
+        }
+        .chart-text {
+            width: 80px;
+            text-align: right;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-  <header class="row">
-    <h1>CoreMIDI/Web MIDI Tester</h1>
-    <span id="midiStatus" class="status" title="Web MIDI access state">Not initialized</span>
-    <span id="sysexChip" class="chip" hidden>SysEx: disabled</span>
-    <span class="chip" title="Clock source">Clock: performance.now()</span>
-    <div style="flex:1"></div>
-    <button id="btnInit">Request MIDI Access</button>
-    <button id="btnRescan" class="secondary" disabled>Rescan</button>
-  </header>
-  <main>
-    <section class="card">
-      <div class="grid">
-        <div>
-          <label for="selInput">Input (receive from):</label>
-          <select id="selInput"></select>
+    <h1>MIDI Timestamp Precision Tester</h1>
+
+    <div class="container">
+        <h2>Configuration</h2>
+        <div class="controls">
+            <div class="control-group">
+                <label for="inputSelect">MIDI Input:</label>
+                <select id="inputSelect">
+                    <option value="">Select input device...</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="outputSelect">MIDI Output:</label>
+                <select id="outputSelect">
+                    <option value="">Select output device...</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="testDuration">Test Duration (ms):</label>
+                <input type="number" id="testDuration" value="5000" min="1000" max="30000" step="100">
+            </div>
+            <div class="control-group">
+                <label for="messageInterval">Message Interval (ms):</label>
+                <input type="number" id="messageInterval" value="100" min="10" max="1000" step="10">
+            </div>
+            <div class="control-group">
+                <label for="toleranceMs">Tolerance (ms):</label>
+                <input type="number" id="toleranceMs" value="5" min="0.1" max="50" step="0.1">
+            </div>
+            <div class="control-group">
+                <label for="testType">Test Type:</label>
+                <select id="testType">
+                    <option value="scheduled">Scheduled Messages</option>
+                    <option value="immediate">Immediate Messages</option>
+                    <option value="mixed">Mixed Timing</option>
+                </select>
+            </div>
         </div>
-        <div>
-          <label for="selOutput">Output (send to):</label>
-          <select id="selOutput"></select>
+
+        <div class="controls">
+            <button id="requestAccess">Request MIDI Access</button>
+            <button id="startTest" disabled>Start Timestamp Test</button>
+            <button id="stopTest" class="stop" disabled>Stop Test</button>
+            <button id="clearLog" class="clear">Clear Log</button>
         </div>
-        <div>
-          <label for="selChannel">MIDI Channel:</label>
-          <select id="selChannel"></select>
-          <small>Use same channel for send and filter (1-16)</small>
+
+        <div id="status" class="status info">Click "Request MIDI Access" to begin</div>
+    </div>
+
+    <div class="container">
+        <h2>Test Results</h2>
+        <div class="results">
+            <div class="metric">
+                <div class="metric-value" id="messagesSent">0</div>
+                <div class="metric-label">Messages Sent</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="messagesReceived">0</div>
+                <div class="metric-label">Messages Received</div>
+            </div>
+            <div class="metric" id="avgLatencyMetric">
+                <div class="metric-value" id="avgLatency">0</div>
+                <div class="metric-label">Avg Latency (ms)</div>
+            </div>
+            <div class="metric" id="maxLatencyMetric">
+                <div class="metric-value" id="maxLatency">0</div>
+                <div class="metric-label">Max Latency (ms)</div>
+            </div>
+            <div class="metric" id="minLatencyMetric">
+                <div class="metric-value" id="minLatency">0</div>
+                <div class="metric-label">Min Latency (ms)</div>
+            </div>
+            <div class="metric" id="jitterMetric">
+                <div class="metric-value" id="jitter">0</div>
+                <div class="metric-label">Jitter (ms)</div>
+            </div>
+            <div class="metric" id="earlyMessagesMetric">
+                <div class="metric-value" id="earlyMessages">0</div>
+                <div class="metric-label">Early Messages</div>
+            </div>
+            <div class="metric" id="lateMessagesMetric">
+                <div class="metric-value" id="lateMessages">0</div>
+                <div class="metric-label">Late Messages</div>
+            </div>
         </div>
-        <div>
-          <label for="chkSysex">SysEx</label>
-          <div class="row">
-            <input id="chkSysex" type="checkbox" />
-            <small>Requires re-requesting access and user approval</small>
-          </div>
+
+        <div class="timestamp-chart">
+            <h3>Timing Distribution</h3>
+            <div id="timingChart"></div>
         </div>
-      </div>
-    </section>
+    </div>
 
-    <section class="card">
-      <div class="grid">
-        <div>
-          <label for="numFrames">Frames to send</label>
-          <input id="numFrames" type="number" value="200" min="1" max="20000" />
-        </div>
-        <div>
-          <label for="frameSpacing">Frame spacing (ms)</label>
-          <input id="frameSpacing" type="number" value="2" min="0" step="0.1" />
-        </div>
-        <div>
-          <label for="intraSpacing">Intra-frame spacing (ms)</label>
-          <input id="intraSpacing" type="number" value="0.4" min="0" step="0.1" />
-        </div>
-        <div>
-          <label for="timeoutMs">Receive timeout (ms)</label>
-          <input id="timeoutMs" type="number" value="3000" min="0" step="100" />
-        </div>
-        <div>
-          <label>&nbsp;</label>
-          <div class="row">
-            <button id="btnStart" disabled>Start Test</button>
-            <button id="btnStop" class="secondary" disabled>Stop</button>
-            <button id="btnClear" class="secondary">Clear Log</button>
-          </div>
-        </div>
-      </div>
-      <small>
-        This test sends a 4-message frame per index: CC112=125 (marker), CC113=idx_MSB, CC114=idx_LSB, then NoteOn 60 with velocity (idx%100)+1.
-        Select an output and an input connected via a loopback (e.g. IAC Driver on macOS) so messages return to this page.
-      </small>
-    </section>
+    <div class="container">
+        <h2>Detailed Log</h2>
+        <div id="log" class="log">Waiting for test to start...</div>
+    </div>
 
-    <section class="card">
-      <div class="grid">
-        <div>
-          <label>Run Summary</label>
-          <div class="kv">
-            <div>Sent frames</div> <div id="statSent">0</div>
-            <div>Received frames</div> <div id="statRecv">0</div>
-            <div>Missing frames</div> <div id="statMissing">0</div>
-            <div>Duplicates</div> <div id="statDup">0</div>
-            <div>Out-of-order</div> <div id="statOOO">0</div>
-            <div>Min inter-arrival (ms)</div> <div id="statMinIA">–</div>
-            <div>Max inter-arrival (ms)</div> <div id="statMaxIA">–</div>
-            <div>Median inter-arrival (ms)</div> <div id="statMedIA">–</div>
-          </div>
-        </div>
-        <div>
-          <label>Details</label>
-          <div id="resultSummary"></div>
-        </div>
-      </div>
-    </section>
+    <script>
+        class MIDITimestampTester {
+            constructor() {
+                this.midiAccess = null;
+                this.selectedInput = null;
+                this.selectedOutput = null;
+                this.testRunning = false;
+                this.testStartTime = 0;
+                this.sentMessages = [];
+                this.receivedMessages = [];
+                this.messageCounter = 0;
+                this.testInterval = null;
 
-    <section class="card">
-      <label>Live Log</label>
-      <div id="log" class="log"></div>
-    </section>
-  </main>
+                this.initializeUI();
+            }
 
-  <script>
-    // Utility helpers
-    const $ = sel => document.querySelector(sel);
-    const logEl = $('#log');
-    function log(msg) {
-      const ts = new Date().toISOString().split('T')[1].replace('Z','');
-      logEl.textContent += `[${ts}] ${msg}\n`;
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-    function setStatus(text, cls) {
-      const el = $('#midiStatus');
-      el.textContent = text;
-      el.classList.remove('ok','warn','err');
-      if (cls) el.classList.add(cls);
-    }
-    function choice(el, items, selectedId) {
-      el.innerHTML = '';
-      for (const it of items) {
-        const opt = document.createElement('option');
-        opt.value = it.value; opt.textContent = it.label;
-        if (selectedId && selectedId === it.value) opt.selected = true;
-        el.appendChild(opt);
-      }
-    }
-    function quantile(arr, q) {
-      if (!arr.length) return NaN;
-      const a = arr.slice().sort((x,y)=>x-y);
-      const pos = (a.length - 1) * q; const base = Math.floor(pos); const rest = pos - base;
-      if (a[base + 1] !== undefined) return a[base] + rest * (a[base+1]-a[base]);
-      return a[base];
-    }
+            initializeUI() {
+                document.getElementById('requestAccess').addEventListener('click', () => this.requestMIDIAccess());
+                document.getElementById('startTest').addEventListener('click', () => this.startTest());
+                document.getElementById('stopTest').addEventListener('click', () => this.stopTest());
+                document.getElementById('clearLog').addEventListener('click', () => this.clearLog());
 
-    // Web MIDI state
-    let midi = null; // MIDIAccess
-    let input = null; // MIDIInput
-    let output = null; // MIDIOutput
-    let useSysex = false;
+                document.getElementById('inputSelect').addEventListener('change', (e) => this.selectInput(e.target.value));
+                document.getElementById('outputSelect').addEventListener('change', (e) => this.selectOutput(e.target.value));
+            }
 
-    // Test run state
-    let running = false;
-    let expectedFrames = 0;
-    let startIndex = 0;
-    let recvSeqSet = new Set();
-    let recvSeqOrder = []; // order of unique seqs as received
-    let intraArrival = [];
-    let dupCount = 0;
-    let oooCount = 0;
-    let frameTimeoutHandle = null;
-    let parserState = null;
+            log(message, type = 'info') {
+                const timestamp = new Date().toISOString().substr(11, 12);
+                const logEl = document.getElementById('log');
+                const typePrefix = type.toUpperCase().padEnd(5);
+                logEl.textContent += `[${timestamp}] ${typePrefix}: ${message}\n`;
+                logEl.scrollTop = logEl.scrollHeight;
 
-    function buildChannelList() {
-      const chSel = $('#selChannel');
-      const items = [];
-      for (let i = 1; i <= 16; i++) items.push({ value: String(i), label: `Channel ${i}` });
-      choice(chSel, items, '1');
-    }
+                console.log(`[MIDI Tester ${type}]`, message);
+            }
 
-    function refreshPortsUI() {
-      const ins = midi ? Array.from(midi.inputs.values()) : [];
-      const outs = midi ? Array.from(midi.outputs.values()) : [];
-      const inputItems = ins.length ? ins.map(p => ({ value: p.id, label: `${p.name} — ${p.manufacturer || 'Unknown'}` })) : [{ value: '', label: 'No inputs' }];
-      const outputItems = outs.length ? outs.map(p => ({ value: p.id, label: `${p.name} — ${p.manufacturer || 'Unknown'}` })) : [{ value: '', label: 'No outputs' }];
-      const prevIn = $('#selInput').value; const prevOut = $('#selOutput').value;
-      choice($('#selInput'), inputItems, prevIn && ins.find(x=>x.id===prevIn) ? prevIn : undefined);
-      choice($('#selOutput'), outputItems, prevOut && outs.find(x=>x.id===prevOut) ? prevOut : undefined);
-      $('#btnStart').disabled = !(ins.length && outs.length);
-      $('#btnRescan').disabled = !midi;
-    }
+            setStatus(message, type = 'info') {
+                const statusEl = document.getElementById('status');
+                statusEl.textContent = message;
+                statusEl.className = `status ${type}`;
+            }
 
-    async function requestAccess() {
-      try {
-        useSysex = $('#chkSysex').checked;
-        setStatus('Requesting access…', 'warn');
-        midi = await navigator.requestMIDIAccess({ sysex: useSysex });
-        midi.onstatechange = (e) => {
-          log(`Port state: ${e.port.type} '${e.port.name}' ${e.port.state}/${e.port.connection}`);
-          refreshPortsUI();
-        };
-        setStatus('MIDI access granted', 'ok');
-        $('#sysexChip').hidden = false; $('#sysexChip').textContent = `SysEx: ${useSysex ? 'enabled' : 'disabled'}`;
-        refreshPortsUI();
-        $('#btnStart').disabled = !(midi.inputs.size && midi.outputs.size);
-        $('#btnRescan').disabled = false;
-      } catch (err) {
-        console.error(err);
-        setStatus('MIDI access denied', 'err');
-        log('Failed to get MIDI access: ' + err);
-      }
-    }
+            async requestMIDIAccess() {
+                try {
+                    this.setStatus('Requesting MIDI access...', 'info');
+                    this.log('Requesting MIDI access with sysex support');
 
-    function connectSelectedPorts() {
-      if (!midi) return;
-      const inId = $('#selInput').value;
-      const outId = $('#selOutput').value;
-      input = inId ? midi.inputs.get(inId) : null;
-      output = outId ? midi.outputs.get(outId) : null;
-      log(`Selected input: ${input ? input.name : '—'}, output: ${output ? output.name : '—'}`);
-    }
+                    this.midiAccess = await navigator.requestMIDIAccess({ sysex: true });
 
-    function msgLen(status) {
-      if (status >= 0x80 && status <= 0xEF) {
-        const hi = status & 0xF0;
-        // Note Off/On/AT/CC/PB: 3 bytes; Program Change/Channel Pressure: 2 bytes
-        if (hi === 0xC0 || hi === 0xD0) return 2;
-        return 3;
-      }
-      // System Common/Real-Time
-      if (status >= 0xF8) return 1; // real-time single bytes
-      if (status === 0xF6) return 1; // Tune Request
-      if (status === 0xF1 || status === 0xF3) return 2; // Time Code, Song Select
-      if (status === 0xF2) return 3; // Song Position
-      return 1; // Treat others as 1 for safety (SysEx handled by not using here)
-    }
+                    this.log(`MIDI access granted. Inputs: ${this.midiAccess.inputs.size}, Outputs: ${this.midiAccess.outputs.size}`);
+                    this.setStatus('MIDI access granted! Select input and output devices.', 'success');
 
-    function splitMessages(bytes) {
-      const out = [];
-      let i = 0; let runningStatus = null;
-      while (i < bytes.length) {
-        let status = bytes[i];
-        if (status < 0x80) {
-          // Running status: reuse previous status
-          if (runningStatus == null) { i++; continue; }
-          status = runningStatus; // do not consume i here
-        } else {
-          runningStatus = (status < 0xF0) ? status : null; // running status only for channel messages
-          i++;
+                    this.populateDeviceSelectors();
+
+                    // Listen for device changes
+                    this.midiAccess.addEventListener('statechange', (e) => {
+                        this.log(`Device state change: ${e.port.name} - ${e.port.state}`, 'info');
+                        this.populateDeviceSelectors();
+                    });
+
+                } catch (error) {
+                    this.log(`Failed to request MIDI access: ${error.message}`, 'error');
+                    this.setStatus(`MIDI access denied: ${error.message}`, 'error');
+                }
+            }
+
+            populateDeviceSelectors() {
+                const inputSelect = document.getElementById('inputSelect');
+                const outputSelect = document.getElementById('outputSelect');
+
+                // Clear existing options (except first)
+                inputSelect.innerHTML = '<option value="">Select input device...</option>';
+                outputSelect.innerHTML = '<option value="">Select output device...</option>';
+
+                // Populate inputs
+                this.midiAccess.inputs.forEach((input) => {
+                    const option = document.createElement('option');
+                    option.value = input.id;
+                    option.textContent = `${input.name} (${input.state})`;
+                    inputSelect.appendChild(option);
+                });
+
+                // Populate outputs
+                this.midiAccess.outputs.forEach((output) => {
+                    const option = document.createElement('option');
+                    option.value = output.id;
+                    option.textContent = `${output.name} (${output.state})`;
+                    outputSelect.appendChild(option);
+                });
+            }
+
+            async selectInput(inputId) {
+                if (!inputId) {
+                    this.selectedInput = null;
+                    this.updateTestButtonState();
+                    return;
+                }
+
+                this.selectedInput = this.midiAccess.inputs.get(inputId);
+                if (this.selectedInput) {
+                    await this.selectedInput.open();
+                    this.selectedInput.onmidimessage = (e) => this.handleMIDIMessage(e);
+                    this.log(`Input selected and opened: ${this.selectedInput.name}`);
+                }
+
+                this.updateTestButtonState();
+            }
+
+            async selectOutput(outputId) {
+                if (!outputId) {
+                    this.selectedOutput = null;
+                    this.updateTestButtonState();
+                    return;
+                }
+
+                this.selectedOutput = this.midiAccess.outputs.get(outputId);
+                if (this.selectedOutput) {
+                    await this.selectedOutput.open();
+                    this.log(`Output selected and opened: ${this.selectedOutput.name}`);
+                }
+
+                this.updateTestButtonState();
+            }
+
+            updateTestButtonState() {
+                const canTest = this.selectedInput && this.selectedOutput && !this.testRunning;
+                document.getElementById('startTest').disabled = !canTest;
+                document.getElementById('stopTest').disabled = !this.testRunning;
+            }
+
+            handleMIDIMessage(event) {
+                if (!this.testRunning) return;
+
+                const receivedTime = performance.now();
+                const data = Array.from(event.data);
+
+                // Look for our test message pattern (Control Change on channel 1)
+                if (data.length >= 3 && data[0] === 0xB0) {
+                    const cc = data[1];
+                    const value = data[2];
+
+                    // CC 120 is our test marker
+                    if (cc === 120) {
+                        const messageId = value;
+                        const sentMessage = this.sentMessages.find(msg => msg.id === messageId);
+
+                        if (sentMessage) {
+                            const latency = receivedTime - sentMessage.scheduledTime;
+                            const earlyLatency = receivedTime - sentMessage.sentTime;
+
+                            const receivedMessage = {
+                                id: messageId,
+                                receivedTime: receivedTime,
+                                scheduledTime: sentMessage.scheduledTime,
+                                sentTime: sentMessage.sentTime,
+                                latency: latency,
+                                earlyLatency: earlyLatency,
+                                eventTimestamp: event.timeStamp || event.receivedTime,
+                                data: data
+                            };
+
+                            this.receivedMessages.push(receivedMessage);
+
+                            // Check if message arrived early (before scheduled time)
+                            const isEarly = receivedTime < sentMessage.scheduledTime - parseFloat(document.getElementById('toleranceMs').value);
+
+                            if (isEarly) {
+                                this.log(`⚠️  EARLY MESSAGE ${messageId}: arrived ${(sentMessage.scheduledTime - receivedTime).toFixed(2)}ms early`, 'warning');
+                            } else {
+                                this.log(`✓ Message ${messageId}: latency ${latency.toFixed(2)}ms, early by ${earlyLatency.toFixed(2)}ms`);
+                            }
+
+                            this.updateResults();
+                        } else {
+                            this.log(`❌ Received unexpected message with ID ${messageId}`, 'error');
+                        }
+                    }
+                }
+            }
+
+            async startTest() {
+                if (this.testRunning) return;
+
+                this.testRunning = true;
+                this.updateTestButtonState();
+
+                // Reset test data
+                this.sentMessages = [];
+                this.receivedMessages = [];
+                this.messageCounter = 0;
+                this.testStartTime = performance.now();
+
+                const duration = parseInt(document.getElementById('testDuration').value);
+                const interval = parseInt(document.getElementById('messageInterval').value);
+                const testType = document.getElementById('testType').value;
+
+                this.log(`Starting timestamp test (${testType}) for ${duration}ms with ${interval}ms intervals`);
+                this.setStatus(`Test running... (${testType})`, 'info');
+
+                // Schedule test messages
+                this.scheduleTestMessages(duration, interval, testType);
+
+                // Auto-stop after duration + buffer
+                setTimeout(() => {
+                    if (this.testRunning) {
+                        this.stopTest();
+                    }
+                }, duration + 2000);
+            }
+
+            scheduleTestMessages(duration, interval, testType) {
+                const startTime = performance.now();
+                let currentTime = startTime;
+
+                const sendMessage = () => {
+                    if (!this.testRunning || (performance.now() - startTime) > duration) {
+                        return;
+                    }
+
+                    const messageId = this.messageCounter % 128; // Keep within MIDI value range
+                    let scheduledTime;
+
+                    switch (testType) {
+                        case 'immediate':
+                            scheduledTime = undefined; // Send immediately
+                            break;
+                        case 'scheduled':
+                            scheduledTime = currentTime;
+                            break;
+                        case 'mixed':
+                            // Alternate between immediate and scheduled
+                            scheduledTime = (this.messageCounter % 2 === 0) ? currentTime : undefined;
+                            break;
+                    }
+
+                    const sentTime = performance.now();
+
+                    // Send CC message: Channel 1, CC 120 (test marker), Value = message ID
+                    const message = [0xB0, 120, messageId];
+
+                    try {
+                        if (scheduledTime !== undefined) {
+                            this.selectedOutput.send(message, scheduledTime);
+                            this.log(`→ Scheduled message ${messageId} for ${(scheduledTime - performance.timeOrigin).toFixed(2)}ms`);
+                        } else {
+                            this.selectedOutput.send(message);
+                            this.log(`→ Sent immediate message ${messageId}`);
+                        }
+
+                        this.sentMessages.push({
+                            id: messageId,
+                            sentTime: sentTime,
+                            scheduledTime: scheduledTime || sentTime,
+                            data: message
+                        });
+
+                        this.messageCounter++;
+
+                    } catch (error) {
+                        this.log(`❌ Failed to send message ${messageId}: ${error.message}`, 'error');
+                    }
+
+                    currentTime += interval;
+
+                    // Schedule next message
+                    setTimeout(sendMessage, interval);
+                };
+
+                // Start sending messages
+                sendMessage();
+            }
+
+            stopTest() {
+                if (!this.testRunning) return;
+
+                this.testRunning = false;
+                this.updateTestButtonState();
+
+                if (this.testInterval) {
+                    clearInterval(this.testInterval);
+                    this.testInterval = null;
+                }
+
+                this.log('Test stopped');
+                this.setStatus('Test completed. Check results below.', 'success');
+
+                // Final results update
+                setTimeout(() => this.updateResults(), 500);
+                this.generateFinalReport();
+            }
+
+            updateResults() {
+                const sent = this.sentMessages.length;
+                const received = this.receivedMessages.length;
+
+                document.getElementById('messagesSent').textContent = sent;
+                document.getElementById('messagesReceived').textContent = received;
+
+                if (received === 0) return;
+
+                const latencies = this.receivedMessages.map(msg => msg.latency);
+                const avgLatency = latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length;
+                const minLatency = Math.min(...latencies);
+                const maxLatency = Math.max(...latencies);
+
+                // Calculate jitter (standard deviation of latencies)
+                const variance = latencies.reduce((sum, lat) => sum + Math.pow(lat - avgLatency, 2), 0) / latencies.length;
+                const jitter = Math.sqrt(variance);
+
+                const tolerance = parseFloat(document.getElementById('toleranceMs').value);
+                const earlyMessages = this.receivedMessages.filter(msg =>
+                    msg.receivedTime < msg.scheduledTime - tolerance
+                ).length;
+                const lateMessages = this.receivedMessages.filter(msg =>
+                    msg.latency > tolerance
+                ).length;
+
+                // Update display
+                document.getElementById('avgLatency').textContent = avgLatency.toFixed(2);
+                document.getElementById('minLatency').textContent = minLatency.toFixed(2);
+                document.getElementById('maxLatency').textContent = maxLatency.toFixed(2);
+                document.getElementById('jitter').textContent = jitter.toFixed(2);
+                document.getElementById('earlyMessages').textContent = earlyMessages;
+                document.getElementById('lateMessages').textContent = lateMessages;
+
+                // Color-code metrics based on performance
+                this.updateMetricColors(avgLatency, maxLatency, jitter, earlyMessages, lateMessages);
+                this.updateTimingChart();
+            }
+
+            updateMetricColors(avgLatency, maxLatency, jitter, earlyMessages, lateMessages) {
+                const tolerance = parseFloat(document.getElementById('toleranceMs').value);
+
+                // Average latency
+                const avgMetric = document.getElementById('avgLatencyMetric');
+                if (avgLatency < tolerance) {
+                    avgMetric.className = 'metric success';
+                } else if (avgLatency < tolerance * 2) {
+                    avgMetric.className = 'metric warning';
+                } else {
+                    avgMetric.className = 'metric error';
+                }
+
+                // Max latency
+                const maxMetric = document.getElementById('maxLatencyMetric');
+                if (maxLatency < tolerance * 2) {
+                    maxMetric.className = 'metric success';
+                } else if (maxLatency < tolerance * 4) {
+                    maxMetric.className = 'metric warning';
+                } else {
+                    maxMetric.className = 'metric error';
+                }
+
+                // Jitter
+                const jitterMetric = document.getElementById('jitterMetric');
+                if (jitter < tolerance) {
+                    jitterMetric.className = 'metric success';
+                } else if (jitter < tolerance * 2) {
+                    jitterMetric.className = 'metric warning';
+                } else {
+                    jitterMetric.className = 'metric error';
+                }
+
+                // Early messages (should be 0)
+                const earlyMetric = document.getElementById('earlyMessagesMetric');
+                if (earlyMessages === 0) {
+                    earlyMetric.className = 'metric success';
+                } else {
+                    earlyMetric.className = 'metric error';
+                }
+
+                // Late messages
+                const lateMetric = document.getElementById('lateMessagesMetric');
+                if (lateMessages === 0) {
+                    lateMetric.className = 'metric success';
+                } else if (lateMessages < this.receivedMessages.length * 0.1) {
+                    lateMetric.className = 'metric warning';
+                } else {
+                    lateMetric.className = 'metric error';
+                }
+            }
+
+            updateTimingChart() {
+                const chartEl = document.getElementById('timingChart');
+                if (this.receivedMessages.length === 0) return;
+
+                const latencies = this.receivedMessages.map(msg => msg.latency);
+                const minLat = Math.min(...latencies);
+                const maxLat = Math.max(...latencies);
+                const range = maxLat - minLat;
+
+                // Create histogram bins
+                const bins = 10;
+                const binSize = range / bins;
+                const histogram = new Array(bins).fill(0);
+
+                latencies.forEach(lat => {
+                    const binIndex = Math.min(Math.floor((lat - minLat) / binSize), bins - 1);
+                    histogram[binIndex]++;
+                });
+
+                const maxCount = Math.max(...histogram);
+
+                chartEl.innerHTML = '';
+                histogram.forEach((count, index) => {
+                    const binStart = minLat + index * binSize;
+                    const binEnd = binStart + binSize;
+                    const percentage = (count / maxCount) * 100;
+
+                    const barEl = document.createElement('div');
+                    barEl.className = 'chart-bar';
+                    barEl.innerHTML = `
+                        <div class="chart-label">${binStart.toFixed(1)}-${binEnd.toFixed(1)}ms</div>
+                        <div class="chart-value" style="width: ${percentage}%"></div>
+                        <div class="chart-text">${count} msgs</div>
+                    `;
+                    chartEl.appendChild(barEl);
+                });
+            }
+
+            generateFinalReport() {
+                if (this.receivedMessages.length === 0) return;
+
+                const tolerance = parseFloat(document.getElementById('toleranceMs').value);
+                const earlyMessages = this.receivedMessages.filter(msg =>
+                    msg.receivedTime < msg.scheduledTime - tolerance
+                );
+
+                this.log('\n=== FINAL TIMESTAMP TEST REPORT ===');
+                this.log(`Total messages sent: ${this.sentMessages.length}`);
+                this.log(`Total messages received: ${this.receivedMessages.length}`);
+                this.log(`Message loss: ${((this.sentMessages.length - this.receivedMessages.length) / this.sentMessages.length * 100).toFixed(1)}%`);
+
+                if (earlyMessages.length > 0) {
+                    this.log(`\n⚠️  TIMING VIOLATIONS DETECTED:`);
+                    this.log(`${earlyMessages.length} messages arrived earlier than scheduled (tolerance: ${tolerance}ms)`);
+                    earlyMessages.forEach(msg => {
+                        const early = msg.scheduledTime - msg.receivedTime;
+                        this.log(`  Message ${msg.id}: arrived ${early.toFixed(2)}ms early`);
+                    });
+                } else {
+                    this.log(`\n✅ NO TIMING VIOLATIONS: All messages respected the timestamp parameter`);
+                }
+
+                this.log('\n=== END REPORT ===\n');
+            }
+
+            clearLog() {
+                document.getElementById('log').textContent = 'Log cleared...\n';
+            }
         }
-        const len = msgLen(status);
-        const data = [status];
-        if (len > 1) { data.push(bytes[i] ?? 0); i++; }
-        if (len > 2) { data.push(bytes[i] ?? 0); i++; }
-        out.push(data);
-      }
-      return out;
-    }
 
-    function channelOf(status) { return status & 0x0F; }
-    function typeOf(status) { return status & 0xF0; }
-
-    function resetRunState() {
-      recvSeqSet = new Set();
-      recvSeqOrder = [];
-      intraArrival = [];
-      dupCount = 0; oooCount = 0;
-      parserState = { stage: 0, msb: 0, lsb: 0, lastTs: NaN };
-      updateStats();
-    }
-
-    function updateStats() {
-      $('#statSent').textContent = String(expectedFrames);
-      const recv = recvSeqSet.size;
-      $('#statRecv').textContent = String(recv);
-      const missing = Math.max(0, expectedFrames - recv);
-      $('#statMissing').textContent = String(missing);
-      $('#statDup').textContent = String(dupCount);
-      $('#statOOO').textContent = String(oooCount);
-      const minIA = intraArrival.length ? Math.min(...intraArrival) : NaN;
-      const maxIA = intraArrival.length ? Math.max(...intraArrival) : NaN;
-      const medIA = intraArrival.length ? quantile(intraArrival, 0.5) : NaN;
-      $('#statMinIA').textContent = Number.isFinite(minIA) ? minIA.toFixed(3) : '–';
-      $('#statMaxIA').textContent = Number.isFinite(maxIA) ? maxIA.toFixed(3) : '–';
-      $('#statMedIA').textContent = Number.isFinite(medIA) ? medIA.toFixed(3) : '–';
-    }
-
-    function handleIncomingFrame(seq, t) {
-      if (recvSeqSet.has(seq)) { dupCount++; }
-      else {
-        // order check
-        if (recvSeqOrder.length && seq !== (recvSeqOrder[recvSeqOrder.length-1] + 1)) {
-          oooCount++;
-        }
-        recvSeqSet.add(seq);
-        recvSeqOrder.push(seq);
-        // inter-arrival
-        if (!Number.isNaN(parserState.lastTs)) {
-          intraArrival.push(t - parserState.lastTs);
-        }
-        parserState.lastTs = t;
-      }
-      updateStats();
-    }
-
-    function processIncomingBytes(bytes, timeStamp) {
-      const msgs = splitMessages(bytes);
-      const selCh = (parseInt($('#selChannel').value, 10) - 1) & 0x0F;
-      for (const m of msgs) {
-        const st = m[0];
-        const ty = typeOf(st);
-        if ((st & 0xF0) < 0x80) continue; // ignore stray data
-        if (channelOf(st) !== selCh) continue; // filter by channel
-        if (ty === 0xB0) {
-          const cc = m[1]; const val = m[2] ?? 0;
-          if (parserState.stage === 0 && cc === 112 && val === 125) {
-            parserState.stage = 1; // saw marker
-          } else if (parserState.stage === 1 && cc === 113) {
-            parserState.msb = val & 0x7F; parserState.stage = 2;
-          } else if (parserState.stage === 2 && cc === 114) {
-            parserState.lsb = val & 0x7F; parserState.stage = 3;
-          } else {
-            // unrelated CC; reset if we were in-progress
-            parserState.stage = 0;
-          }
-        } else if (ty === 0x90) { // Note On
-          const note = m[1]; const vel = m[2] || 0;
-          if (parserState.stage === 3 && note === 60 && vel > 0) {
-            const seq = ((parserState.msb << 7) | parserState.lsb) >>> 0;
-            handleIncomingFrame(seq, timeStamp);
-          }
-          parserState.stage = 0; // reset after note
-        } else {
-          // Ignore other types for the frame protocol
-        }
-      }
-    }
-
-    function attachInputListener() {
-      if (!input) return;
-      input.onmidimessage = (e) => {
-        processIncomingBytes(e.data, e.receivedTime || e.timeStamp || performance.now());
-      };
-    }
-
-    function detachInputListener() {
-      if (input) input.onmidimessage = null;
-    }
-
-    function sendTestSequence() {
-      if (!output) { log('No output selected'); return; }
-      const frames = expectedFrames;
-      const ch = ((parseInt($('#selChannel').value, 10) - 1) & 0x0F) >>> 0;
-      const statusCC = 0xB0 | ch;
-      const statusNoteOn = 0x90 | ch;
-      const now = performance.now();
-      const frameSpacingMs = parseFloat($('#frameSpacing').value) || 0;
-      const intraMs = parseFloat($('#intraSpacing').value) || 0;
-
-      for (let i = 0; i < frames; i++) {
-        const t0 = now + i * frameSpacingMs;
-        // CC 112 marker 125 (0x7D)
-        output.send([statusCC, 112, 125], t0 + 0);
-        // CC 113 MSB
-        output.send([statusCC, 113, (i >> 7) & 0x7F], t0 + intraMs);
-        // CC 114 LSB
-        output.send([statusCC, 114, i & 0x7F], t0 + 2*intraMs);
-        // Note On 60 velocity
-        const vel = (i % 100) + 1;
-        output.send([statusNoteOn, 60, vel], t0 + 3*intraMs);
-      }
-      log(`Scheduled ${frames} frames over ${(frames*frameSpacingMs).toFixed(1)} ms`);
-    }
-
-    function finishRun(reason) {
-      if (!running) return;
-      running = false;
-      clearTimeout(frameTimeoutHandle);
-      $('#btnStart').disabled = false;
-      $('#btnStop').disabled = true;
-      const missing = Math.max(0, expectedFrames - recvSeqSet.size);
-      const ok = missing === 0 && dupCount === 0 && oooCount === 0;
-      const result = ok ? 'PASS' : 'FAIL';
-      const color = ok ? 'ok' : 'err';
-      log(`${result}: ${expectedFrames} sent, ${recvSeqSet.size} received, missing=${missing}, dup=${dupCount}, ooo=${oooCount}. ${reason || ''}`.trim());
-      const summary = `Result: <span class="${color}">${result}</span><br/>` +
-        `Sent=${expectedFrames}, Received=${recvSeqSet.size}, Missing=${missing}, Duplicates=${dupCount}, OutOfOrder=${oooCount}`;
-      $('#resultSummary').innerHTML = summary;
-    }
-
-    function startRun() {
-      if (!midi) { log('Call Request MIDI Access first.'); return; }
-      connectSelectedPorts();
-      if (!input || !output) { log('Select both input and output ports.'); return; }
-      expectedFrames = Math.max(1, Math.min(20000, parseInt($('#numFrames').value, 10) || 1));
-      resetRunState();
-      running = true;
-      $('#btnStart').disabled = true;
-      $('#btnStop').disabled = false;
-      attachInputListener();
-      log('Starting run… Ensure your output routes back to the selected input (e.g., IAC Driver loopback).');
-      // Give the input a moment to attach before sending
-      setTimeout(() => {
-        sendTestSequence();
-        const timeoutMs = Math.max(0, parseInt($('#timeoutMs').value, 10) || 0);
-        frameTimeoutHandle = setTimeout(() => finishRun('Timed out waiting for remaining frames'), timeoutMs);
-      }, 20);
-    }
-
-    function stopRun() { finishRun('Stopped by user'); }
-
-    function clearLog() { logEl.textContent = ''; }
-
-    // Wire up UI
-    $('#btnInit').addEventListener('click', requestAccess);
-    $('#btnRescan').addEventListener('click', refreshPortsUI);
-    $('#selInput').addEventListener('change', connectSelectedPorts);
-    $('#selOutput').addEventListener('change', connectSelectedPorts);
-    $('#selChannel').addEventListener('change', () => {});
-    $('#btnStart').addEventListener('click', startRun);
-    $('#btnStop').addEventListener('click', stopRun);
-    $('#btnClear').addEventListener('click', clearLog);
-
-    // Initialize dropdowns
-    buildChannelList();
-
-    // Environment hints
-    if (!('requestMIDIAccess' in navigator)) {
-      setStatus('Web MIDI not supported in this browser', 'err');
-      log('Web MIDI API not available. Try Chrome, Edge, or Safari with proper flags.');
-    } else {
-      setStatus('Ready. Click "Request MIDI Access" to begin.', 'warn');
-    }
-
-    // Guidance
-    log('Welcome! This page tests CoreMIDI via the Web MIDI API.');
-    log('1) Click "Request MIDI Access".');
-    log('2) Pick an Output and an Input that are connected (use macOS IAC Driver for loopback).');
-    log('3) Click "Start Test" to send structured frames and verify ordering and drops.');
-  </script>
+        // Initialize the tester when the page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            new MIDITimestampTester();
+        });
+    </script>
 </body>
 </html>
