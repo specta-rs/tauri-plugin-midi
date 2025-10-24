@@ -162,7 +162,7 @@ fn output_send(
 ) -> Result<(), String> {
     let timestamp = timestamp
         .map(|s| {
-            s.parse::<u64>()
+            s.parse::<u128>()
                 .map_err(|e| format!("Failed to parse timestamp: {e}"))
         })
         .transpose()?;
@@ -178,15 +178,13 @@ fn output_send(
         drop(state);
         let tstate = (*tstate).clone();
         tauri::async_runtime::spawn(async move {
-            let until = Instant::now()
-                // We take `1ms` for processing overhead
-                + Duration::from_millis(timestamp - 1)
-                    .checked_sub(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("SystemTime is before epoch"),
-                    )
-                    .unwrap_or(Duration::ZERO);
+            let current_epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("SystemTime is before epoch")
+                .as_millis();
+
+            let delay_ms = timestamp.saturating_sub(current_epoch);
+            let until = Instant::now() + Duration::from_millis(delay_ms as u64);
             sleep_until(until.into()).await;
 
             let mut state = tstate.lock().unwrap_or_else(PoisonError::into_inner);
