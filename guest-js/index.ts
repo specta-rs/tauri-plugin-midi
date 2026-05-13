@@ -195,7 +195,7 @@ globalThis.MIDIPort = TauriMIDIPort as any; // TODO
 
 class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/MIDIMessageEvent/data) */
-  readonly data: Uint8Array;
+  readonly data: Uint8Array<ArrayBuffer>;
 
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);

@@ -10,12 +10,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.9.0",
-    "@tauri-apps/plugin-shell": "2.3.1"
+    "@tauri-apps/api": "2.11.0",
+    "@tauri-apps/plugin-shell": "2.3.5"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.9.1",
+    "@tauri-apps/cli": "2.11.1",
     "typescript": "^5.9.3",
-    "vite": "^7.1.12"
+    "vite": "^8.0.12"
   }
 }
