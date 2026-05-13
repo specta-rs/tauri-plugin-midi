@@ -82,18 +82,14 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
   }
 
   __tauri_statechange(inputs: [string, string][], outputs: [string, string][]) {
-    let events: TauriMIDIConnectionEvent[] = [];
+    let ports: TauriMIDIPort[] = [];
 
     // Delete any disconnected inputs
     for (const [id, input] of this.inputs) {
       if (!inputs.find(([i, _]) => i === id)) {
         this.inputs.delete(id);
         input.state = "disconnected";
-        events.push(
-          new TauriMIDIConnectionEvent("statechange", {
-            port: input,
-          })
-        );
+        ports.push(input);
       }
     }
 
@@ -102,42 +98,30 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
       if (!outputs.find(([i, _]) => i === id)) {
         this.outputs.delete(id);
         output.state = "disconnected";
-        events.push(
-          new TauriMIDIConnectionEvent("statechange", {
-            port: output,
-          })
-        );
+        ports.push(output);
       }
     }
 
     // Add any new inputs
     for (const [id, name] of inputs) {
       if (this.inputs.has(id)) continue;
-      const input = new TauriMIDIInput(id, name);
+      const input = new TauriMIDIInput(this, id, name);
       input.state = "connected";
       this.inputs.set(id, input);
-      events.push(
-        new TauriMIDIConnectionEvent("statechange", {
-          port: input,
-        })
-      );
+      ports.push(input);
     }
 
     // Add any new outputs
     for (const [id, name] of outputs) {
       if (this.outputs.has(id)) continue;
-      const output = new TauriMIDIOutput(id, name);
+      const output = new TauriMIDIOutput(this, id, name);
       output.state = "connected";
       this.outputs.set(id, output);
-      events.push(
-        new TauriMIDIConnectionEvent("statechange", {
-          port: output,
-        })
-      );
+      ports.push(output);
     }
 
     // We delay so the consumer has a chance to attach event listeners
-    setTimeout(() => events.forEach((event) => this.dispatchEvent(event)), 0);
+    setTimeout(() => ports.forEach((port) => port.__tauri_dispatch_statechange()), 0);
   }
 }
 
@@ -152,6 +136,7 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
   readonly version = null;
 
   constructor(
+    private access: TauriMIDIAccess,
     public identifier: string,
     public name: string,
     public readonly type: MIDIPortType
@@ -159,6 +144,15 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     super();
     this.id = identifier;
     this.name = name;
+
+    this.addEventListener("statechange", (event) => {
+      if (this.onstatechange) return this.onstatechange(event);
+    });
+  }
+
+  __tauri_dispatch_statechange() {
+    this.dispatchEvent(new TauriMIDIConnectionEvent("statechange", { port: this }));
+    this.access.dispatchEvent(new TauriMIDIConnectionEvent("statechange", { port: this }));
   }
 
   async open(): Promise<MIDIPort> {
@@ -168,10 +162,7 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     if (this.state === "disconnected") {
       this.connection = "pending";
 
-      //   for (const instance of midiInstances) {
-      //     instance.dispatchEvent(new Event("statechange"));
-      //   }
-      this.dispatchEvent(new Event("statechange"));
+      this.__tauri_dispatch_statechange();
 
       return this;
     }
@@ -181,10 +172,7 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
     this.connection = "open";
 
-    // for (const instance of midiInstances) {
-    //   instance.dispatchEvent(new Event("statechange"));
-    // }
-    this.dispatchEvent(new Event("statechange"));
+    this.__tauri_dispatch_statechange();
 
     return this;
   }
@@ -197,10 +185,7 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
     this.connection = "closed";
 
-    // for (const instance of midiInstances) {
-    //   instance.dispatchEvent(new Event("statechange"));
-    // }
-    this.dispatchEvent(new Event("statechange"));
+    this.__tauri_dispatch_statechange();
 
     return this;
   }
@@ -210,7 +195,7 @@ globalThis.MIDIPort = TauriMIDIPort as any; // TODO
 
 class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/MIDIMessageEvent/data) */
-  readonly data: Uint8Array<ArrayBuffer>;
+  readonly data: Uint8Array;
 
   constructor(type: string, eventInitDict?: MIDIMessageEventInit) {
     super(type, eventInitDict);
@@ -222,8 +207,8 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
 globalThis.MIDIMessageEvent = TauriMIDIMessageEvent as any; // TODO
 
 class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
-  constructor(id: string, name: string) {
-    super(id, name, "input");
+  constructor(access: TauriMIDIAccess, id: string, name: string) {
+    super(access, id, name, "input");
 
     this.addEventListener("midimessage", (event) => {
       if (this.onmidimessage) return this.onmidimessage(event);
@@ -271,7 +256,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 
   set onmidimessage(cb: ((this: MIDIInput, ev: Event) => any) | null) {
     this._onmidimessage = cb;
-    if (this.connection !== "open") this.open();
+    if (cb && this.connection !== "open") this.open();
   }
 
   addEventListener(
@@ -280,7 +265,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
     options?: boolean | AddEventListenerOptions
   ) {
     super.addEventListener(type, listener, options);
-    if (type === "midimessage" && this.state === "connected" && this.connection !== "open") {
+    if (type === "midimessage" && listener && this.state === "connected" && this.connection !== "open") {
       this.open();
     }
   }
@@ -289,8 +274,8 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
 globalThis.MIDIInput = TauriMIDIInput as any; // TODO
 
 class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
-  constructor(id: string, name: string) {
-    super(id, name, "output");
+  constructor(access: TauriMIDIAccess, id: string, name: string) {
+    super(access, id, name, "output");
   }
 
   send(data: number[], timestamp?: DOMHighResTimeStamp) {
