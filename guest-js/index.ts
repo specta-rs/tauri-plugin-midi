@@ -27,6 +27,56 @@ const events = {
 };
 
 // https://webaudio.github.io/web-midi-api
+//
+// ── Iframes (https://github.com/specta-rs/tauri-plugin-midi/issues/7) ───────
+//
+// The plugin registers this polyfill for *every* frame, but Tauri only injects
+// `window.__TAURI_INTERNALS__` (the IPC invoke bridge) and the event plugin into
+// the main frame. WebView2 cannot scope an init script to a single frame, so on
+// Windows subframes get the whole IPC as well.
+//
+// So a frame can be in one of three states:
+//
+//   * `main`   — it has the Tauri IPC. It behaves exactly as this plugin always
+//                has, and additionally relays traffic to any child frame that
+//                asks for it.
+//   * `relay`  — it has no Tauri IPC but is same-origin with the top frame (a
+//                macOS/Linux subframe). It talks to the top frame over
+//                `postMessage`, which forwards its calls into the real IPC.
+//   * `inactive` — anything else. In particular a *cross-origin* frame gets
+//                nothing: Tauri capabilities are scoped to the webview's window
+//                label rather than to a frame, so bridging one would hand the
+//                app's IPC surface to a foreign origin. Leaving the frame alone
+//                also preserves that page's own native Web MIDI implementation.
+
+const BRIDGE_TAG = "tauri-plugin-midi/frame-bridge";
+/** How often a child frame re-announces itself to the top frame while handshaking. */
+const BRIDGE_HELLO_RETRY_MS = 50;
+/** How many times it tries before giving up (~1s in total). */
+const BRIDGE_HELLO_ATTEMPTS = 20;
+
+type PortList = [string, string][];
+type MidiMessagePayload = [string, string, number[]];
+
+/** The subset of plugin commands a bridged frame is allowed to invoke. */
+type BridgedCommand = "openInput" | "closeInput" | "openOutput" | "closeOutput" | "outputSend";
+
+const BRIDGED_COMMANDS: Record<BridgedCommand, (...args: any[]) => Promise<any>> = {
+  openInput: commands.openInput,
+  closeInput: commands.closeInput,
+  openOutput: commands.openOutput,
+  closeOutput: commands.closeOutput,
+  outputSend: commands.outputSend,
+};
+
+type BridgeEvent = "state-change" | "midi-message";
+
+// Routing of backend traffic. Both are assigned once at startup, before any
+// instance can be constructed.
+let callCommand: (command: BridgedCommand, args: unknown[]) => Promise<unknown>;
+let listenMidiMessage: (cb: (payload: MidiMessagePayload) => void) => Promise<UnlistenFn>;
+/** Set on frames that serve child frames. */
+let relay: FrameRelay | null = null;
 
 // Backend errors arrive as plain strings; Web MIDI consumers expect DOMExceptions.
 function toMidiError(err: unknown, name: string): Error {
@@ -34,6 +84,9 @@ function toMidiError(err: unknown, name: string): Error {
   return new DOMException(String(err), name);
 }
 
+// Deliberately settled by `bootstrap()`. The rejection is only meant for
+// callers of `requestMIDIAccess()`; attaching a handler here keeps the timeout
+// from surfacing as an unhandled rejection in frames that never bridge.
 let resolve: () => void;
 const ready = new Promise((r, reject) => {
   const timeout = setTimeout(
@@ -45,9 +98,10 @@ const ready = new Promise((r, reject) => {
     r(void 0);
   };
 });
+ready.catch(() => {});
 
-let _inputs: [string, string][] = [];
-let _outputs: [string, string][] = [];
+let _inputs: PortList = [];
+let _outputs: PortList = [];
 
 // Hold weak references so MIDIAccess instances can be garbage collected. A plain
 // Set<TauriMIDIAccess> keeps every instance (and its ports and event listeners)
@@ -71,9 +125,7 @@ function forEachMidiInstance(fn: (instance: TauriMIDIAccess) => void) {
   }
 }
 
-events.stateChange.listen((event) => {
-  const { inputs, outputs } = event.payload;
-
+function handleStateChange(inputs: PortList, outputs: PortList) {
   // We cache the last values so any new instances can be created without waiting.
   _inputs = inputs;
   _outputs = outputs;
@@ -83,23 +135,29 @@ events.stateChange.listen((event) => {
 
   // Invoke the state change on all instances
   forEachMidiInstance((instance) => instance.__tauri_statechange(inputs, outputs));
-});
 
-// One process-wide `midi-message` listener for the whole polyfill, mirroring the
-// `state-change` listener above. Routing through the weak instance set — instead
-// of registering a listener per input port — means no event registration ever
-// closes over a port, so opening a port and never closing it can no longer root
-// its `MIDIAccess` (and ports, and listeners) for the lifetime of the webview.
-events.midiMessage.listen((event) => {
-  const [inputName, timestampRaw, data] = event.payload;
+  // Let any child frames see the same state.
+  relay?.stateChange(inputs, outputs);
+}
+
+// Route one `midi-message` to the matching open input port of every live
+// instance. There is exactly one subscription to `plugin:midi:midi-message` per
+// frame — registered from `bootstrap()` through the frame-aware
+// `listenMidiMessage` (the real IPC in the main frame, the relay in a bridged
+// child). Routing through the weak instance set rather than registering a
+// listener per port means no event registration ever closes over a port, so
+// opening a port and never closing it can no longer root its `MIDIAccess` (and
+// ports, and listeners) for the lifetime of the webview (#24).
+function handleMidiMessage(payload: MidiMessagePayload) {
+  const [inputName, timestampRaw, data] = payload;
 
   forEachMidiInstance((access) => {
     // Only live input ports receive messages. Looking the id up in `inputs` (as
     // opposed to outputs) also handles an id that exists as both.
     const port = access.inputs.get(inputName);
     if (!port || port.type !== "input") return;
-    // The old listener only existed between `open()` and `close()`, so match it:
-    // a port that is disconnected or closed does not receive messages.
+    // `onmidimessage`/`addEventListener` open the port implicitly and `close()`
+    // stops delivery, so only an open input receives messages (as in Chrome).
     if (port.connection !== "open") return;
 
     const timestamp = parseInt(timestampRaw);
@@ -113,7 +171,10 @@ events.midiMessage.listen((event) => {
 
     port.dispatchEvent(midiEvent);
   });
-});
+
+  // ...and on to any bridged child frames.
+  relay?.midiMessage(payload);
+}
 
 class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
   readonly port: MIDIPort;
@@ -123,8 +184,6 @@ class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
     this.port = (eventInitDict?.port || null)!;
   }
 }
-
-globalThis.MIDIConnectionEvent = TauriMIDIConnectionEvent;
 
 class TauriMIDIAccess extends EventTarget implements MIDIAccess {
   sysexEnabled = true;
@@ -179,7 +238,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     return port;
   }
 
-  __tauri_statechange(inputs: [string, string][], outputs: [string, string][]) {
+  __tauri_statechange(inputs: PortList, outputs: PortList) {
     let ports: TauriMIDIPort[] = [];
 
     // Delete any disconnected inputs
@@ -218,8 +277,6 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     setTimeout(() => ports.forEach((port) => port.__tauri_dispatch_statechange()), 0);
   }
 }
-
-globalThis.MIDIAccess = TauriMIDIAccess;
 
 class TauriMIDIPort extends EventTarget implements MIDIPort {
   connection: MIDIPortConnectionState = "closed";
@@ -313,8 +370,8 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     }
 
     try {
-      if (this.type === "input") await commands.openInput(this.id);
-      else await commands.openOutput(this.id);
+      if (this.type === "input") await callCommand("openInput", [this.id]);
+      else await callCommand("openOutput", [this.id]);
     } catch (err) {
       throw toMidiError(err, "NotAllowedError");
     }
@@ -344,8 +401,8 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     if (this.connection === "closed") return this;
 
     try {
-      if (this.type === "input") await commands.closeInput(this.id);
-      else await commands.closeOutput(this.id);
+      if (this.type === "input") await callCommand("closeInput", [this.id]);
+      else await callCommand("closeOutput", [this.id]);
     } catch (err) {
       throw toMidiError(err, "NotAllowedError");
     }
@@ -360,8 +417,6 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
   }
 }
 
-globalThis.MIDIPort = TauriMIDIPort as any; // TODO
-
 class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/MIDIMessageEvent/data) */
   readonly data: Uint8Array<ArrayBuffer>;
@@ -373,8 +428,6 @@ class TauriMIDIMessageEvent extends Event implements MIDIMessageEvent {
   }
 }
 
-globalThis.MIDIMessageEvent = TauriMIDIMessageEvent as any; // TODO
-
 class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   constructor(access: TauriMIDIAccess, id: string, name: string) {
     super(access, id, name, "input");
@@ -383,6 +436,7 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
       if (this.onmidimessage) return this.onmidimessage(event);
     });
   }
+
 
   private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;
 
@@ -407,8 +461,6 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
   }
 }
 
-globalThis.MIDIInput = TauriMIDIInput as any; // TODO
-
 class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
   constructor(access: TauriMIDIAccess, id: string, name: string) {
     super(access, id, name, "output");
@@ -431,12 +483,372 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
     // so a backend failure cannot be reported back to the caller. Log it rather than
     // letting it escape as an unhandled rejection; the port's `statechange` is the
     // only spec-legal signal a consumer can observe.
-    p.then(() => commands.outputSend(this.id, data, epoch ? epoch.toString() : null)).catch((err) => {
+    p.then(() => callCommand("outputSend", [this.id, data, epoch ? epoch.toString() : null])).catch((err) => {
       console.error("Failed to send MIDI message:", err);
     });
   }
 }
 
-globalThis.MIDIOutput = TauriMIDIOutput as any; // TODO
+function installPolyfill() {
+  globalThis.MIDIConnectionEvent = TauriMIDIConnectionEvent;
+  globalThis.MIDIAccess = TauriMIDIAccess;
+  globalThis.MIDIPort = TauriMIDIPort as any; // TODO
+  globalThis.MIDIMessageEvent = TauriMIDIMessageEvent as any; // TODO
+  globalThis.MIDIInput = TauriMIDIInput as any; // TODO
+  globalThis.MIDIOutput = TauriMIDIOutput as any; // TODO
 
-navigator.requestMIDIAccess = () => ready.then(() => new TauriMIDIAccess());
+  navigator.requestMIDIAccess = () => ready.then(() => new TauriMIDIAccess());
+}
+
+// ── Frame bridge ───────────────────────────────────────────────────────────
+
+interface FrameRelay {
+  stateChange(inputs: PortList, outputs: PortList): void;
+  midiMessage(payload: MidiMessagePayload): void;
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(16);
+  const crypto = (globalThis as any).crypto;
+  if (crypto?.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * True for a serialised origin we can safely compare against. An *opaque* origin
+ * serialises to `"null"` (some embedders use the empty string), and every opaque
+ * origin in a webview serialises the same way — so it can never be used as a
+ * gate: the top frame cannot tell a sandboxed stranger from a frame the app
+ * meant to bridge, and a child cannot tell whether `window.top` is really
+ * same-origin with it. Opaque origins are therefore not bridgeable on either end.
+ */
+function isUsableOrigin(origin: unknown): origin is string {
+  return typeof origin === "string" && origin !== "" && origin !== "null";
+}
+
+/**
+ * Main-frame side of the bridge: forwards the Tauri IPC to same-origin child
+ * frames over `postMessage`.
+ */
+function createRelay(): FrameRelay {
+  const win = globalThis as any;
+  const selfOrigin = win.location.origin;
+  // A top frame with an opaque origin serves nobody. Refusing here (rather than
+  // in the caller) keeps the gate next to the check it guards.
+  const bridgeable = isUsableOrigin(selfOrigin);
+
+  // `event.source` -> the frame we are willing to serve.
+  const children = new Map<any, { token: string; client: string; origin: string }>();
+  let lastState: { inputs: PortList; outputs: PortList } | null = null;
+
+  const reply = (source: any, origin: string, message: Record<string, unknown>) => {
+    try {
+      source.postMessage({ [BRIDGE_TAG]: true, ...message }, origin);
+    } catch {
+      // The frame is gone.
+      children.delete(source);
+    }
+  };
+
+  // A child frame that has been detached from the document stops accepting
+  // messages, but posting to it is a silent no-op rather than an error, so
+  // nothing else would ever evict it. Skip (and forget) closed frames so a
+  // long-lived app does not accumulate a dead entry for every iframe it ever
+  // created and re-post every 1 Hz state change to all of them.
+  const evicted = (source: any) => {
+    if (source?.closed === true) {
+      children.delete(source);
+      return true;
+    }
+    return false;
+  };
+
+  const broadcast = (name: BridgeEvent, payload: unknown) => {
+    for (const [source, child] of children) {
+      if (evicted(source)) continue;
+      reply(source, child.origin, { kind: "event", token: child.token, name, payload });
+    }
+  };
+
+  const onMessage = (event: any) => {
+    const data = event?.data;
+    if (!data || typeof data !== "object" || data[BRIDGE_TAG] !== true) return;
+    // The Tauri capability set covers the whole webview, so only frames that
+    // share our origin may use it. Everything else — including remote iframes
+    // that happen to run this same init script — is ignored outright.
+    if (!bridgeable || event.origin !== selfOrigin) return;
+    const source = event.source;
+    if (!source) return;
+
+    if (data.kind === "hello") {
+      if (typeof data.client !== "string") return;
+
+      let child = children.get(source);
+      if (!child) {
+        child = { token: randomToken(), client: data.client, origin: selfOrigin };
+        children.set(source, child);
+      }
+
+      reply(source, child.origin, {
+        kind: "welcome",
+        token: child.token,
+        client: data.client,
+        origin: selfOrigin,
+      });
+
+      // Hand over the current port list so the child doesn't have to wait for
+      // the backend's next update before `requestMIDIAccess()` can settle.
+      if (lastState) {
+        reply(source, child.origin, {
+          kind: "event",
+          token: child.token,
+          name: "state-change",
+          payload: lastState,
+        });
+      }
+
+      return;
+    }
+
+    // The child tells us when its document goes away, so we can drop it without
+    // waiting for the next broadcast to notice it is closed. The token (or the
+    // client id, before the handshake completed) has to match, so one frame
+    // cannot evict another's bridged sibling.
+    if (data.kind === "bye") {
+      const child = children.get(source);
+      if (
+        child &&
+        (data.token === child.token ||
+          (typeof data.client === "string" && data.client === child.client))
+      ) {
+        children.delete(source);
+      }
+      return;
+    }
+
+    if (data.kind === "invoke") {
+      const child = children.get(source);
+      if (!child || child.token !== data.token) return;
+      if (typeof data.id !== "string") return;
+
+      const command = Object.prototype.hasOwnProperty.call(BRIDGED_COMMANDS, data.command)
+        ? BRIDGED_COMMANDS[data.command as BridgedCommand]
+        : undefined;
+      if (!command) return;
+
+      const args = Array.isArray(data.args) ? data.args : [];
+      Promise.resolve()
+        .then(() => command(...args))
+        .then(
+          (value) => reply(source, child!.origin, { kind: "result", token: child!.token, id: data.id, ok: true, value: value ?? null }),
+          (error) => {
+            // Relay the pieces a DOMException needs, not a stringified error:
+            // otherwise the child cannot reconstruct `error.name`, and every
+            // bridged rejection would surface as a nameless error instead of
+            // the `NotAllowedError` a consumer expects.
+            const message = String(error?.message ?? error);
+            const name = error instanceof DOMException ? error.name : "NotAllowedError";
+            reply(source, child!.origin, { kind: "result", token: child!.token, id: data.id, ok: false, message, name });
+          }
+        );
+    }
+  };
+
+  win.addEventListener("message", onMessage);
+
+  return {
+    stateChange(inputs, outputs) {
+      lastState = { inputs, outputs };
+      broadcast("state-change", lastState);
+    },
+    midiMessage(payload) {
+      broadcast("midi-message", payload);
+    },
+  };
+}
+
+interface FrameClient {
+  invoke(command: BridgedCommand, args: unknown[]): Promise<unknown>;
+  listen(name: BridgeEvent, cb: (payload: any) => void): UnlistenFn;
+}
+
+/**
+ * Child-frame side of the bridge: relays everything through `window.top`.
+ */
+function createRelayClient(top: any, topOrigin: string): FrameClient {
+  const win = globalThis as any;
+  const client = randomToken();
+  const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  const queued: { command: BridgedCommand; args: unknown[]; resolve: (value: unknown) => void; reject: (error: Error) => void }[] = [];
+  const listeners: Record<BridgeEvent, Set<(payload: any) => void>> = {
+    "state-change": new Set(),
+    "midi-message": new Set(),
+  };
+  // Only the top frame knows this value, so nobody else can pretend to be it
+  // after the handshake.
+  let token: string | null = null;
+  let handshake: any = null;
+  let attempts = 0;
+  let nextRequestId = 0;
+
+  const send = (message: Record<string, unknown>) => {
+    try {
+      top.postMessage({ [BRIDGE_TAG]: true, ...message }, topOrigin);
+    } catch {
+      // The top frame navigated away.
+    }
+  };
+
+  const sayHello = () => {
+    if (token || attempts >= BRIDGE_HELLO_ATTEMPTS) return;
+    attempts++;
+    send({ kind: "hello", client });
+    if (!token) handshake = setTimeout(sayHello, BRIDGE_HELLO_RETRY_MS);
+  };
+
+  const flushQueued = () => {
+    for (const request of queued.splice(0)) dispatch(request);
+  };
+
+  const dispatch = (request: { command: BridgedCommand; args: unknown[]; resolve: (value: unknown) => void; reject: (error: Error) => void }) => {
+    const id = `${client}:${++nextRequestId}`;
+    pending.set(id, { resolve: request.resolve, reject: request.reject });
+    send({ kind: "invoke", token, id, command: request.command, args: request.args });
+  };
+
+  const onMessage = (event: any) => {
+    const data = event?.data;
+    if (!data || typeof data !== "object" || data[BRIDGE_TAG] !== true) return;
+    // Only the top frame itself is allowed to answer us, and only if it is the
+    // origin we handshook with.
+    if (event.source !== top) return;
+    if (event.origin !== topOrigin) return;
+
+    if (data.kind === "welcome") {
+      if (data.client !== client || typeof data.token !== "string") return;
+      token = data.token;
+      if (handshake) {
+        clearTimeout(handshake);
+        handshake = null;
+      }
+      flushQueued();
+      return;
+    }
+
+    if (typeof token !== "string" || data.token !== token) return;
+
+    if (data.kind === "event") {
+      if (!Object.prototype.hasOwnProperty.call(listeners, data.name)) return;
+      for (const listener of listeners[data.name as BridgeEvent]) {
+        try {
+          listener(data.payload);
+        } catch {
+          // A listener blowing up must not take the whole frame down.
+        }
+      }
+      return;
+    }
+
+    if (data.kind === "result") {
+      const request = pending.get(data.id);
+      if (!request) return;
+      pending.delete(data.id);
+      if (data.ok) request.resolve(data.value ?? null);
+      else request.reject(new DOMException(String(data.message), String(data.name ?? "NotAllowedError")));
+    }
+  };
+
+  win.addEventListener("message", onMessage);
+  // Tell the top frame when this document really goes away, so it can drop us
+  // instead of holding a dead entry until the next broadcast. A `pagehide` with
+  // `persisted: true` means the document was put in the back/forward cache: it is
+  // not gone, it will be restored with its heap (and its token) intact, and the
+  // top frame keeps its entry. Announcing `bye` there would strand the frame
+  // forever — the restored document never re-hellos — so it is skipped.
+  win.addEventListener("pagehide", (event: any) => {
+    if (event?.persisted) return;
+    send({ kind: "bye", client, token });
+  });
+  // Restored from the back/forward cache. We may have missed state changes while
+  // frozen, so re-announce to resynchronise (the top replies with `welcome` and
+  // the current port list).
+  win.addEventListener("pageshow", (event: any) => {
+    if (!event?.persisted) return;
+    send({ kind: "hello", client });
+  });
+  sayHello();
+
+  return {
+    invoke(command, args) {
+      return new Promise((resolve, reject) => {
+        const request = { command, args, resolve, reject };
+        if (token) dispatch(request);
+        else queued.push(request);
+      });
+    },
+    listen(name, cb) {
+      listeners[name].add(cb);
+      return () => listeners[name].delete(cb);
+    },
+  };
+}
+
+/**
+ * The top frame's origin, or `null` when this frame is not bridgeable to it.
+ * Reading `location` across origins throws, and an opaque origin serialises to
+ * `"null"`, which is not a usable gate — see [isUsableOrigin].
+ */
+function readTopOrigin(top: any): string | null {
+  try {
+    const origin = top.location.origin;
+    return isUsableOrigin(origin) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function bootstrap() {
+  const win = globalThis as any;
+  const hasInternals = !!(globalThis as any).__TAURI_INTERNALS__;
+
+  let top: any = null;
+  try {
+    top = win.top;
+  } catch {
+    // Ignore — treated as the top frame.
+  }
+  const isTopFrame = !top || top === win.self || top === win;
+
+  // A child frame may only relay the webview's IPC if it shares the top frame's
+  // origin. Anything else is left untouched, including the page's own
+  // `navigator.requestMIDIAccess` if the browser provides one.
+  const topOrigin = isTopFrame ? null : readTopOrigin(top);
+  if (!isTopFrame && topOrigin === null) return;
+
+  // The main frame is guaranteed to have the Tauri IPC injected before this
+  // script runs; without it there is nothing to talk to.
+  if (isTopFrame && !hasInternals) return;
+
+  if (hasInternals) {
+    relay = createRelay();
+    callCommand = (command, args) => BRIDGED_COMMANDS[command](...args);
+    listenMidiMessage = (cb) => events.midiMessage.listen((event) => cb(event.payload));
+    events.stateChange.listen((event) => handleStateChange(event.payload.inputs, event.payload.outputs));
+  } else {
+    const bridge = createRelayClient(top, topOrigin!);
+    callCommand = (command, args) => bridge.invoke(command, args);
+    listenMidiMessage = (cb) => Promise.resolve(bridge.listen("midi-message", cb));
+    bridge.listen("state-change", (payload) => handleStateChange(payload.inputs, payload.outputs));
+  }
+
+  // Exactly one `midi-message` subscription per frame, via the frame-aware
+  // indirection: the real Tauri event plugin in the main frame, the relay in a
+  // bridged child. `handleMidiMessage` routes to local ports and also forwards to
+  // child frames, so there is no second subscription on a child's behalf.
+  listenMidiMessage(handleMidiMessage);
+
+  installPolyfill();
+}
+
+bootstrap();

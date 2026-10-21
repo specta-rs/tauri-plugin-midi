@@ -242,10 +242,11 @@ struct MIDIMessage(String, String, Vec<u8>);
 ///
 /// and now you can use the regular [WebMIDI API](https://developer.mozilla.org/en-US/docs/Web/API/Web_MIDI_API) from within your webview.
 ///
-/// ## Known issues
-///
-/// - This plugin doesn't work within iframes at the moment. It's being tracked as [#7](https://github.com/specta-rs/tauri-plugin-midi/issues/7)
-///
+/// The polyfill is injected into every frame (not just the main frame) so that it can be
+/// used from within iframes. Tauri itself only injects `__TAURI_INTERNALS__` and the IPC
+/// bridge into the main frame (and, on Windows, into subframes too), so in a same-origin
+/// subframe on macOS/Linux the polyfill bridges its IPC calls to the top frame over
+/// `postMessage`. See [issue #7](https://github.com/specta-rs/tauri-plugin-midi/issues/7).
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     // Tauri did a breaking change in 2.7.0 so we do this outside to ensure backwards compatibility
     let polyfill: String = RUNTIME_POLYFILL.into();
@@ -258,7 +259,11 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             close_output,
             output_send
         ])
-        .js_init_script(polyfill)
+        // Inject into all frames, not just the main frame. The polyfill is frame-aware: it
+        // only activates in the top frame or in a same-origin child frame of it. Tauri's own
+        // `__TAURI_INTERNALS__`/IPC scripts remain main-frame-only on macOS and Linux, which is
+        // why subframes need the `postMessage` bridge rather than the IPC bridge directly.
+        .js_init_script_on_all_frames(polyfill)
         .setup(move |app, _| {
             app.manage(State::default());
 

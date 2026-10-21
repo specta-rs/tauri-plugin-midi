@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tauri-plugin-midi — manual iframe check</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 24px; color: #222; }
+      h1 { font-size: 17px; }
+      h2 { font-size: 14px; margin-top: 28px; }
+      table { border-collapse: collapse; margin-top: 8px; }
+      th, td { border: 1px solid #ccc; padding: 3px 7px; text-align: left; vertical-align: top; }
+      th { background: #f4f4f4; font-weight: 600; }
+      pre { background: #f7f7f7; padding: 8px; }
+      #frames { position: absolute; width: 0; height: 0; overflow: hidden; }
+      #frames iframe { width: 0; height: 0; border: 0; }
+      .ok { color: #096; }
+      .bad { color: #b00; }
+      .warn { color: #a60; }
+    </style>
+  </head>
+  <body>
+    <h1>tauri-plugin-midi — manual iframe check</h1>
+    <p>
+      Run <code>cd example &amp;&amp; pnpm tauri dev</code>, then open this page
+      (link on the example's home page). The iframe support (issue&nbsp;#7) cannot
+      be verified from Node: it depends on how the engine serialises the Tauri
+      custom-scheme origin. What each row must show is in
+      <code>IFRAME-CHECKLIST.md</code>.
+    </p>
+
+    <h2>Top frame</h2>
+    <pre id="top">…</pre>
+
+    <h2>Child frames</h2>
+    <table id="report">
+      <thead>
+        <tr>
+          <th>child</th>
+          <th>expected</th>
+          <th>child href</th>
+          <th>child location.origin</th>
+          <th>__TAURI_INTERNALS__</th>
+          <th>requestMIDIAccess</th>
+          <th>resolved</th>
+          <th>ports in/out</th>
+          <th>ping top→child</th>
+          <th>child saw origin</th>
+          <th>error</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="frames"></div>
+
+    <script type="module">
+      const TOP_ORIGIN = location.origin;
+      document.getElementById("top").textContent = JSON.stringify(
+        {
+          href: location.href,
+          origin: location.origin,
+          protocol: location.protocol,
+          hasInternals: typeof window.__TAURI_INTERNALS__ !== "undefined",
+        },
+        null,
+        2
+      );
+
+      // The exact document the probe frames run, so the real same-origin `src`
+      // file and the `srcdoc` / `blob:` / `data:` / `about:blank` variants cannot
+      // drift apart.
+      const CHILD_HTML = await fetch("/child-check.html").then((r) => r.text());
+      const BLOB_URL = URL.createObjectURL(new Blob([CHILD_HTML], { type: "text/html" }));
+      const DATA_URL = "data:text/html;charset=utf-8," + encodeURIComponent(CHILD_HTML);
+
+      const probes = [
+        { label: "same-origin src", expected: "bridged", src: "/child-check.html" },
+        { label: "same-origin srcdoc", expected: "bridged", srcdoc: CHILD_HTML },
+        { label: "same-origin blob:", expected: "bridged", src: BLOB_URL },
+        { label: "about:blank", expected: "bridged", aboutBlank: true },
+        { label: "remote https://example.com", expected: "left alone", src: "https://example.com/" },
+        { label: "sandbox=allow-scripts", expected: "left alone", srcdoc: CHILD_HTML, sandbox: "allow-scripts" },
+        { label: "data: URL", expected: "left alone", src: DATA_URL },
+      ];
+
+      const tbody = document.querySelector("#report tbody");
+      const framesHost = document.getElementById("frames");
+      const rows = new Map();
+
+      for (const probe of probes) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${probe.label}</td><td>${probe.expected}</td>` + "<td></td>".repeat(9);
+        tbody.appendChild(tr);
+        rows.set(probe.label, tr);
+
+        const iframe = document.createElement("iframe");
+        if (probe.src) iframe.src = probe.src;
+        if (probe.srcdoc) iframe.srcdoc = probe.srcdoc;
+        if (probe.sandbox) iframe.setAttribute("sandbox", probe.sandbox);
+        framesHost.appendChild(iframe);
+        probe.iframe = iframe;
+      }
+
+      // `about:blank` starts same-origin (and inherits it), so it can be written
+      // directly.
+      for (const probe of probes.filter((p) => p.aboutBlank)) {
+        const doc = probe.iframe.contentDocument;
+        doc.open();
+        doc.write(CHILD_HTML);
+        doc.close();
+      }
+
+      const childReports = new Map(); // WindowProxy -> report
+      const pongs = new Map(); // WindowProxy -> pong
+
+      addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || typeof data !== "object") return;
+        if (data.kind === "midi-iframe-child") childReports.set(event.source, data);
+        else if (data.kind === "midi-iframe-pong") pongs.set(event.source, data);
+        else return;
+        render();
+      });
+
+      function setCell(tr, index, value, cls) {
+        const td = tr.children[index];
+        td.textContent = value;
+        td.className = cls || "";
+      }
+
+      function render() {
+        for (const probe of probes) {
+          const tr = rows.get(probe.label);
+          const win = probe.iframe.contentWindow;
+          const report = childReports.get(win);
+          if (!report) {
+            setCell(tr, 2, "(no report — frame has not loaded yet)", "warn");
+            continue;
+          }
+          const pong = pongs.get(win);
+          setCell(tr, 2, report.href);
+          setCell(tr, 3, report.origin);
+          setCell(tr, 4, report.hasInternals ? "yes" : "no");
+          setCell(tr, 5, report.hasRequestMIDIAccess ? "yes" : "no");
+          setCell(
+            tr,
+            6,
+            report.resolved === null ? "n/a" : String(report.resolved),
+            report.resolved === false ? "bad" : ""
+          );
+          setCell(tr, 7, report.ports ? `${report.ports.inputs.length} / ${report.ports.outputs.length}` : "");
+          setCell(tr, 8, pong ? "received" : "not yet", pong ? "ok" : "warn");
+          setCell(tr, 9, pong ? pong.sawOrigin : "");
+          setCell(tr, 10, report.error || "");
+        }
+      }
+
+      // Ping each frame with the *top's own origin* as `targetOrigin` — exactly
+      // what the relay does. If the engine will not accept that origin, the ping
+      // never arrives and the "ping" column stays "not yet" — which is the
+      // failure mode the bridge cannot survive.
+      function ping() {
+        for (const probe of probes) {
+          try {
+            probe.iframe.contentWindow?.postMessage({ kind: "midi-iframe-ping" }, TOP_ORIGIN);
+          } catch (error) {
+            console.warn("ping failed for", probe.label, error);
+          }
+        }
+      }
+
+      render();
+      setTimeout(ping, 500);
+      setTimeout(ping, 2500);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>tauri-plugin-midi iframe child</title>
+  </head>
+  <body>
+    <p id="status">checking…</p>
+    <script>
+      // Runs inside every probe frame of `iframe-check.html` (same-origin `src`,
+      // `srcdoc`, `blob:`, `data:` and `about:blank`). It reports what this frame
+      // can see and answers a ping so the parent can confirm the `postMessage`
+      // origin behaviour the frame bridge depends on.
+      (async () => {
+        const info = {
+          kind: "midi-iframe-child",
+          href: location.href,
+          origin: location.origin,
+          protocol: location.protocol,
+          hasInternals: typeof window.__TAURI_INTERNALS__ !== "undefined",
+          hasRequestMIDIAccess: typeof navigator.requestMIDIAccess === "function",
+          resolved: null,
+          ports: null,
+          error: null,
+        };
+
+        if (info.hasRequestMIDIAccess) {
+          try {
+            // A bridged frame resolves quickly; the polyfill's own 10s timeout
+            // turns a frame that installed but never bridged into an error.
+            const access = await navigator.requestMIDIAccess();
+            info.resolved = true;
+            info.ports = {
+              inputs: [...access.inputs.keys()],
+              outputs: [...access.outputs.keys()],
+            };
+          } catch (error) {
+            info.resolved = false;
+            info.error = String(
+              error && error.name ? `${error.name}: ${error.message}` : error
+            );
+          }
+        }
+
+        document.getElementById("status").textContent = JSON.stringify(info);
+        parent.postMessage(info, "*");
+      })();
+
+      addEventListener("message", (event) => {
+        if (event.data && event.data.kind === "midi-iframe-ping") {
+          parent.postMessage(
+            {
+              kind: "midi-iframe-pong",
+              href: location.href,
+              origin: location.origin,
+              // What this frame sees as the sender's origin. The bridge only
+              // accepts traffic when this equals its own `location.origin`.
+              sawOrigin: event.origin,
+            },
+            "*"
+          );
+        }
+      });
+    </script>
+  </body>
+</html>
