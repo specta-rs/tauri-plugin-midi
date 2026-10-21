@@ -311,8 +311,12 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
         : Promise.resolve();
 
     const epoch = timestamp ? Math.trunc(performance.timeOrigin + timestamp): null;
+    // `send()` returns `undefined` and the spec defines no rejection channel for it,
+    // so a backend failure cannot be reported back to the caller. Log it rather than
+    // letting it escape as an unhandled rejection; the port's `statechange` is the
+    // only spec-legal signal a consumer can observe.
     p.then(() => commands.outputSend(this.id, data, epoch ? epoch.toString() : null)).catch((err) => {
-      console.error("Failed to send MIDI message:", toMidiError(err, "InvalidStateError"));
+      console.error("Failed to send MIDI message:", err);
     });
   }
 }
