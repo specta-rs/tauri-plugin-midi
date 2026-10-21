@@ -96,6 +96,12 @@ test("midi messages are dispatched to input listeners", async () => {
   const received = [];
   input.onmidimessage = (event) => received.push([...event.data]);
 
+  // `onmidimessage` opens the port implicitly and `open()` is asynchronous, so
+  // wait until the port is actually open before the backend delivers a message.
+  // This matches Chrome, which only delivers messages to an open MIDIInput.
+  await tick();
+  assert.equal(input.connection, "open");
+
   env.midiMessage("in-1", 1234, [0x90, 0x40, 0x7f]);
   await tick();
 
