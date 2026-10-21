@@ -19,6 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # `tauri` links WebKitGTK/GTK on Linux, so the crate cannot even be built
+      # without these. Minimum set from Tauri's Ubuntu 24.04 prerequisites.
+      - name: Install Tauri's Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Install Rust
         run: rustup update --no-self-update stable && rustup default stable
       - run: rustc --version && cargo --version
