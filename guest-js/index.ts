@@ -77,6 +77,10 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
   inputs = new Map<string, TauriMIDIInput>();
   outputs = new Map<string, TauriMIDIOutput>();
 
+  // Ports are retained across a disconnect/reconnect so listeners survive, mirroring
+  // Chrome's behaviour. Keyed by `${type}:${id}`.
+  private portMap = new Map<string, TauriMIDIPort>();
+
   onstatechange: ((this: MIDIAccess, ev: Event) => any) | null = null;
 
   addEventListener<K extends keyof MIDIAccessEventMap>(
@@ -110,6 +114,16 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     });
   }
 
+  private __tauri_get_or_create_port(type: MIDIPortType, id: string, name: string): TauriMIDIPort {
+    const key = `${type}:${id}`;
+    let port = this.portMap.get(key);
+    if (!port) {
+      port = type === "input" ? new TauriMIDIInput(this, id, name) : new TauriMIDIOutput(this, id, name);
+      this.portMap.set(key, port);
+    }
+    return port;
+  }
+
   __tauri_statechange(inputs: [string, string][], outputs: [string, string][]) {
     let ports: TauriMIDIPort[] = [];
 
@@ -117,8 +131,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     for (const [id, input] of this.inputs) {
       if (!inputs.find(([i, _]) => i === id)) {
         this.inputs.delete(id);
-        input.state = "disconnected";
-        ports.push(input);
+        if (!input.__tauri_set_device_state("disconnected")) ports.push(input);
       }
     }
 
@@ -126,27 +139,24 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     for (const [id, output] of this.outputs) {
       if (!outputs.find(([i, _]) => i === id)) {
         this.outputs.delete(id);
-        output.state = "disconnected";
-        ports.push(output);
+        if (!output.__tauri_set_device_state("disconnected")) ports.push(output);
       }
     }
 
     // Add any new inputs
     for (const [id, name] of inputs) {
       if (this.inputs.has(id)) continue;
-      const input = new TauriMIDIInput(this, id, name);
-      input.state = "connected";
+      const input = this.__tauri_get_or_create_port("input", id, name) as TauriMIDIInput;
       this.inputs.set(id, input);
-      ports.push(input);
+      if (!input.__tauri_set_device_state("connected")) ports.push(input);
     }
 
     // Add any new outputs
     for (const [id, name] of outputs) {
       if (this.outputs.has(id)) continue;
-      const output = new TauriMIDIOutput(this, id, name);
-      output.state = "connected";
+      const output = this.__tauri_get_or_create_port("output", id, name) as TauriMIDIOutput;
       this.outputs.set(id, output);
-      ports.push(output);
+      if (!output.__tauri_set_device_state("connected")) ports.push(output);
     }
 
     // We delay so the consumer has a chance to attach event listeners
@@ -184,9 +194,29 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     this.access.dispatchEvent(new TauriMIDIConnectionEvent("statechange", { port: this }));
   }
 
+  // Mirrors Blink's MIDIPort::SetState so `state`/`connection` (and the statechange
+  // event that reports them) match Chrome. Returns true when this call already
+  // dispatched a statechange.
+  __tauri_set_device_state(state: MIDIPortDeviceState): boolean {
+    if (state === "disconnected") {
+      this.connection =
+        this.connection === "open" || this.connection === "pending" ? "pending" : "closed";
+      this.state = "disconnected";
+      return false;
+    }
+
+    if (this.connection === "pending") {
+      this.state = "connected";
+      this.open(); // open() dispatches the statechange
+      return true;
+    }
+
+    this.state = "connected";
+    return false;
+  }
+
   async open(): Promise<MIDIPort> {
-    if (this.connection === "open" || this.connection === "pending")
-      return this;
+    if (this.connection === "open") return this;
 
     if (this.state === "disconnected") {
       this.connection = "pending";
