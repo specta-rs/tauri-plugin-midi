@@ -27,9 +27,6 @@ tauri = "2.12.4"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 tokio = { version = "1.54.0", features = ["time"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-coremidi-hotplug-notification = "0.1.4"
-
 [dev-dependencies]
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript"] }
 specta-typescript = { version = "0.0.12" }

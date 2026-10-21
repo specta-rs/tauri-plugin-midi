@@ -270,25 +270,36 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 
             let app = app.clone();
 
-            #[cfg(target_os = "macos")]
-            coremidi_hotplug_notification::receive_device_updates(|| {})
-                .expect("Failed to register for MIDI device updates");
-
-            spawn(move || {
-                let midi_in = midir::MidiInput::new("tauri-plugin-midi blank input")
-                    .map_err(|e| format!("Failed to create MIDI input: {e}"))
-                    .unwrap();
-                let midi_out = midir::MidiOutput::new("tauri-plugin-midi blank output")
-                    .map_err(|e| format!("Failed to create MIDI output: {e}"))
-                    .unwrap();
+            spawn(move || loop {
+                // Creating a MIDI client can fail transiently (e.g. the OS is
+                // still tearing down a previous client). Never let that kill
+                // device detection for the rest of the process - log it and
+                // retry instead.
+                let midi_in = match midir::MidiInput::new("tauri-plugin-midi blank input") {
+                    Ok(midi_in) => midi_in,
+                    Err(e) => {
+                        eprintln!("Failed to create MIDI input: {e}");
+                        std::thread::sleep(Duration::from_millis(1000));
+                        continue;
+                    }
+                };
+                let midi_out = match midir::MidiOutput::new("tauri-plugin-midi blank output") {
+                    Ok(midi_out) => midi_out,
+                    Err(e) => {
+                        eprintln!("Failed to create MIDI output: {e}");
+                        std::thread::sleep(Duration::from_millis(1000));
+                        continue;
+                    }
+                };
 
                 loop {
-                    StateChange {
+                    let state_change = StateChange {
                         inputs: get_inputs(&midi_in).unwrap_or_default(),
                         outputs: get_outputs(&midi_out).unwrap_or_default(),
+                    };
+                    if let Err(e) = state_change.emit(&app) {
+                        eprintln!("Failed to emit MIDI state change: {e}");
                     }
-                    .emit(&app)
-                    .unwrap();
 
                     std::thread::sleep(Duration::from_millis(1000));
                 }
