@@ -86,13 +86,12 @@ function makeIpc() {
     midiCalls,
     deliver,
     // Mirrors Tauri's `__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener`, which
-    // deletes the transformed callback from the registry. The fake IPC's
-    // `plugin:event|unlisten` handler only drops the id from `listeners`; without
-    // this the registry retains every callback forever, so leak probes that close
-    // a port report false positives.
-    unregisterListener(event, id) {
+    // deletes the transformed callback from the registry. Dropping the listener
+    // record is the `plugin:event|unlisten` command's job (handled above), so this
+    // only clears the callback — without it the registry retains every callback
+    // forever and leak probes that close a port report false positives.
+    unregisterListener(_event, id) {
       callbacks.delete(id);
-      listeners.get(event)?.delete(id);
     },
     setFailure(command, error) {
       failure = { command, error };
