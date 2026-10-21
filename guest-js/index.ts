@@ -24,8 +24,27 @@ const ready = new Promise((r, reject) => {
 let _inputs: [string, string][] = [];
 let _outputs: [string, string][] = [];
 
-// TODO: https://github.com/specta-rs/tauri-plugin-midi/issues/10
-const midiInstances = new Set<TauriMIDIAccess>();
+// Hold weak references so MIDIAccess instances can be garbage collected. A plain
+// Set<TauriMIDIAccess> keeps every instance (and its ports and event listeners)
+// alive forever, which leaks on every requestMIDIAccess() call.
+const midiInstances = new Set<WeakRef<TauriMIDIAccess>>();
+const midiInstanceRegistry = new FinalizationRegistry<WeakRef<TauriMIDIAccess>>((ref) =>
+  midiInstances.delete(ref)
+);
+
+function trackMidiInstance(instance: TauriMIDIAccess) {
+  const ref = new WeakRef(instance);
+  midiInstances.add(ref);
+  midiInstanceRegistry.register(instance, ref);
+}
+
+function forEachMidiInstance(fn: (instance: TauriMIDIAccess) => void) {
+  for (const ref of midiInstances) {
+    const instance = ref.deref();
+    if (instance) fn(instance);
+    else midiInstances.delete(ref);
+  }
+}
 
 events.stateChange.listen((event) => {
   const { inputs, outputs } = event.payload;
@@ -38,9 +57,7 @@ events.stateChange.listen((event) => {
   resolve();
 
   // Invoke the state change on all instances
-  for (const instance of midiInstances) {
-    instance.__tauri_statechange(inputs, outputs);
-  }
+  forEachMidiInstance((instance) => instance.__tauri_statechange(inputs, outputs));
 });
 
 class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
@@ -85,7 +102,7 @@ class TauriMIDIAccess extends EventTarget implements MIDIAccess {
     this.__tauri_statechange(_inputs, _outputs);
 
     // Register for events
-    midiInstances.add(this);
+    trackMidiInstance(this);
 
     // For some reason the `EventTarget` stuff isn't triggering this correctly.
     this.addEventListener("statechange", (event) => {
