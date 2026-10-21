@@ -207,7 +207,15 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
 
     if (this.connection === "pending") {
       this.state = "connected";
-      this.open(); // open() dispatches the statechange
+      // Reopening is asynchronous. If the backend refuses (for example because the
+      // device is already gone), end in a terminal closed state and dispatch, so
+      // consumers observe the failure instead of a port left stranded at
+      // (connected, pending) with no event and an unhandled rejection.
+      this.open().catch(() => {
+        this.state = "disconnected";
+        this.connection = "closed";
+        this.__tauri_dispatch_statechange();
+      });
       return true;
     }
 
@@ -219,6 +227,10 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     if (this.connection === "open") return this;
 
     if (this.state === "disconnected") {
+      // A port that is already pending has already notified consumers; opening it
+      // again is a no-op (Blink emits no event for a redundant open).
+      if (this.connection === "pending") return this;
+
       this.connection = "pending";
 
       this.__tauri_dispatch_statechange();
@@ -233,9 +245,17 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
       throw toMidiError(err, "NotAllowedError");
     }
 
-    this.connection = "open";
-
-    this.__tauri_dispatch_statechange();
+    // The device may have gone away while the backend round-trip was in flight.
+    // Blink re-checks the device state once the backend open completes and, when
+    // the port is gone, ends at (disconnected, pending) instead of reporting a
+    // disconnected port as "open". The comparison is made against the declared
+    // union because the state can change across the await above.
+    const next: MIDIPortConnectionState =
+      (this.state as MIDIPortDeviceState) === "disconnected" ? "pending" : "open";
+    if (this.connection !== next) {
+      this.connection = next;
+      this.__tauri_dispatch_statechange();
+    }
 
     return this;
   }
