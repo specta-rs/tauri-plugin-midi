@@ -124,6 +124,10 @@ test("a disconnect during an in-flight reopen leaves the port 'pending', not 'op
 // MAJOR 2: a failed reopen must still report a terminal state. The backend
 // rejects when the device is already gone, and the port used to be left at
 // (connected, pending) with no event and an unhandled rejection.
+//
+// Blink settles at (connected, closed): `SetState(CONNECTED)` leaves the device
+// connected and only the failed `OpenAsynchronously` moves `connection`. The port
+// must therefore stay in `access.inputs` and remain recoverable.
 test("a failing reopen dispatches a terminal statechange and does not strand the port", async () => {
   const unhandled = [];
   const onUnhandled = (reason) => unhandled.push(reason);
@@ -151,7 +155,7 @@ test("a failing reopen dispatches a terminal statechange and does not strand the
     await tick(20);
 
     assert.equal(events.length, 1, "expected exactly one statechange for the failed reopen");
-    assert.deepEqual(events.at(-1), { state: "disconnected", connection: "closed" });
+    assert.deepEqual(events.at(-1), { state: "connected", connection: "closed" });
     assert.ok(
       !(input.state === "connected" && input.connection === "pending"),
       "the port must not be stranded at connected/pending"
@@ -160,6 +164,124 @@ test("a failing reopen dispatches a terminal statechange and does not strand the
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+// A failed reopen only fails to *open*: the device is still connected, so the
+// port stays in `access.inputs`.
+test("a failed reopen leaves the port connected", async () => {
+  const env = await makeEnv();
+  env.stateChange([["in-1", "Keyboard"]], []);
+  const access = await env.requestAccess();
+  const input = access.inputs.get("in-1");
+
+  await input.open();
+  env.stateChange([], []);
+  await tick();
+
+  env.ipc.setFailure("plugin:midi|open_input", "Failed to find port by id 'in-1'");
+  env.stateChange([["in-1", "Keyboard"]], []);
+  await tick(20);
+
+  assert.equal(input.state, "connected");
+  assert.equal(input.connection, "closed");
+  assert.equal(access.inputs.get("in-1"), input, "the connected device stays in access.inputs");
+});
+
+// The failure above must not strand the port: a follow-up open() has to reach the
+// backend. Before the fix `state` was forced back to "disconnected", so open()
+// took the disconnected/pending branch and returned without calling the backend,
+// leaving the port permanently unopenable.
+test("a follow-up open() after a failed reopen reaches the backend", async () => {
+  const env = await makeEnv();
+  env.stateChange([["in-1", "Keyboard"]], []);
+  const access = await env.requestAccess();
+  const input = access.inputs.get("in-1");
+
+  await input.open();
+  env.stateChange([], []);
+  await tick();
+
+  env.ipc.setFailure("plugin:midi|open_input", "Failed to find port by id 'in-1'");
+  env.stateChange([["in-1", "Keyboard"]], []);
+  await tick(20);
+
+  // The device is really back; a fresh open() must invoke the backend again.
+  env.ipc.clearFailure();
+  const callsBefore = env.ipc.midiCalls.length;
+  await input.open();
+  await tick();
+
+  const newCalls = env.ipc.midiCalls.slice(callsBefore);
+  assert.ok(
+    newCalls.some((call) => call.command === "plugin:midi|open_input"),
+    "a follow-up open() on a failed reopen must still invoke plugin:midi|open_input"
+  );
+  assert.equal(input.state, "connected");
+  assert.equal(input.connection, "open");
+});
+
+// The superseded-open race: when two reconnects are outstanding, the earlier
+// attempt's failure must not clobber the later attempt's success.
+test("a superseded reopen failure does not clobber a newer successful reopen", async () => {
+  const env = await makeEnv();
+  env.stateChange([["in-1", "Keyboard"]], []);
+  const access = await env.requestAccess();
+  const input = access.inputs.get("in-1");
+
+  await input.open();
+  env.stateChange([], []);
+  await tick();
+
+  const events = [];
+  input.addEventListener("statechange", (event) => {
+    events.push({ state: event.port.state, connection: event.port.connection });
+  });
+
+  // Reconnect A: its open_input is rejected immediately.
+  env.ipc.setFailure("plugin:midi|open_input", "Failed to find port by id 'in-1'");
+  env.stateChange([["in-1", "Keyboard"]], []);
+  // Reconnect B: the device is present again, so its open_input succeeds. These
+  // `stateChange` calls are synchronous, so A and B are both in flight before any
+  // microtask runs — A's rejection settles before B's success.
+  env.ipc.clearFailure();
+  env.stateChange([], []);
+  env.stateChange([["in-1", "Keyboard"]], []);
+  await tick(20);
+
+  assert.equal(input.state, "connected");
+  assert.equal(input.connection, "open", "the newer successful reopen owns the port");
+  assert.equal(access.inputs.get("in-1"), input);
+
+  const last = events.at(-1);
+  assert.deepEqual(last, { state: "connected", connection: "open" });
+  assert.ok(
+    !events.some((e) => e.connection === "closed"),
+    "the superseded failure must not transition the port to closed"
+  );
+});
+
+// The port above is only left in `access.inputs` while the device is connected: a
+// later poll that omits it removes it, as the spec requires.
+test("a failed reopen is cleaned up by a following poll that omits the device", async () => {
+  const env = await makeEnv();
+  env.stateChange([["in-1", "Keyboard"]], []);
+  const access = await env.requestAccess();
+  const input = access.inputs.get("in-1");
+
+  await input.open();
+  env.stateChange([], []);
+  await tick();
+
+  env.ipc.setFailure("plugin:midi|open_input", "Failed to find port by id 'in-1'");
+  env.stateChange([["in-1", "Keyboard"]], []);
+  await tick(20);
+  assert.equal(access.inputs.has("in-1"), true);
+
+  env.stateChange([], []);
+  await tick();
+
+  assert.equal(access.inputs.has("in-1"), false);
+  assert.equal(input.state, "disconnected");
 });
 
 // MINOR 3: opening a port that is already pending is a no-op. Calling open()

@@ -194,11 +194,18 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     this.access.dispatchEvent(new TauriMIDIConnectionEvent("statechange", { port: this }));
   }
 
+  // Bumped whenever a port transition starts. An asynchronous open records the
+  // generation it began under and only applies its result while that generation is
+  // still current, so a superseded attempt can never clobber a newer transition
+  // (a reconnect, a disconnect, or an explicit open()/close()).
+  private __tauri_generation = 0;
+
   // Mirrors Blink's MIDIPort::SetState so `state`/`connection` (and the statechange
   // event that reports them) match Chrome. Returns true when this call already
   // dispatched a statechange.
   __tauri_set_device_state(state: MIDIPortDeviceState): boolean {
     if (state === "disconnected") {
+      this.__tauri_generation++;
       this.connection =
         this.connection === "open" || this.connection === "pending" ? "pending" : "closed";
       this.state = "disconnected";
@@ -208,13 +215,23 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     if (this.connection === "pending") {
       this.state = "connected";
       // Reopening is asynchronous. If the backend refuses (for example because the
-      // device is already gone), end in a terminal closed state and dispatch, so
-      // consumers observe the failure instead of a port left stranded at
-      // (connected, pending) with no event and an unhandled rejection.
-      this.open().catch(() => {
-        this.state = "disconnected";
-        this.connection = "closed";
-        this.__tauri_dispatch_statechange();
+      // device is already gone), only `connection` settles: the device is still
+      // connected (that is why the reopen was attempted), so `state` remains
+      // "connected" and the port stays in `access.inputs`, matching the spec. A
+      // later open() then reaches the backend again. Blink's SetState(CONNECTED)
+      // followed by a failed OpenAsynchronously ends at (connected, closed).
+      const reopen = this.open();
+      // open() bumps the generation synchronously before it first awaits, so this
+      // is the generation of the attempt we just started.
+      const attempt = this.__tauri_generation;
+      reopen.catch(() => {
+        // A newer transition (another reconnect, a disconnect, or an explicit
+        // open()/close()) supersedes this failure; its result owns the port now.
+        if (attempt !== this.__tauri_generation) return;
+        if (this.connection === "pending") {
+          this.connection = "closed";
+          this.__tauri_dispatch_statechange();
+        }
       });
       return true;
     }
@@ -224,6 +241,8 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
   }
 
   async open(): Promise<MIDIPort> {
+    const generation = ++this.__tauri_generation;
+
     if (this.connection === "open") return this;
 
     if (this.state === "disconnected") {
@@ -245,6 +264,10 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
       throw toMidiError(err, "NotAllowedError");
     }
 
+    // A newer transition superseded this open while the backend round-trip was in
+    // flight; it owns the port's state now.
+    if (generation !== this.__tauri_generation) return this;
+
     // The device may have gone away while the backend round-trip was in flight.
     // Blink re-checks the device state once the backend open completes and, when
     // the port is gone, ends at (disconnected, pending) instead of reporting a
@@ -261,6 +284,8 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
   }
 
   async close(): Promise<MIDIPort> {
+    const generation = ++this.__tauri_generation;
+
     if (this.connection === "closed") return this;
 
     try {
@@ -269,6 +294,8 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
     } catch (err) {
       throw toMidiError(err, "NotAllowedError");
     }
+
+    if (generation !== this.__tauri_generation) return this;
 
     this.connection = "closed";
 
