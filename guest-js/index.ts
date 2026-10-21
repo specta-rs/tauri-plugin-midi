@@ -1,5 +1,30 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { events, commands } from "./bindings.js";
+import type { StateChange, MIDIMessage } from "./bindings.js";
+
+// Hand-written runtime for the wire protocol. `bindings.ts` above is generated
+// by `cargo test --features specta` and only used here for its types, so that
+// the specta runtime does not end up in the bundled polyfill.
+const commands = {
+  openInput: (id: string) => invoke("plugin:midi|open_input", { id }),
+  closeInput: (id: string) => invoke("plugin:midi|close_input", { id }),
+  openOutput: (id: string) => invoke("plugin:midi|open_output", { id }),
+  closeOutput: (id: string) => invoke("plugin:midi|close_output", { id }),
+  outputSend: (id: string, msg: number[], timestamp: string | null) =>
+    invoke("plugin:midi|output_send", { id, msg, timestamp }),
+};
+
+const events = {
+  midiMessage: {
+    listen: (cb: (event: { payload: MIDIMessage }) => void): Promise<UnlistenFn> =>
+      listen("plugin:midi:midi-message", cb as any),
+  },
+  stateChange: {
+    listen: (cb: (event: { payload: StateChange }) => void): Promise<UnlistenFn> =>
+      listen("plugin:midi:state-change", cb as any),
+  },
+};
 
 // https://webaudio.github.io/web-midi-api
 

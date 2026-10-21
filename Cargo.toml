@@ -19,12 +19,18 @@ all-features = true
 rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+# Enables the specta/tauri-specta derives so `cargo test --features specta` can
+# regenerate the TypeScript bindings. Off by default so the plugin does not ship
+# specta at runtime.
+specta = ["dep:specta", "dep:tauri-specta"]
+
 [dependencies]
 midir = "0.11"
 serde = "1"
-specta = "=2.0.0-rc.25"
+specta = { version = "=2.0.0-rc.25", optional = true }
 tauri = "2.12.4"
-tauri-specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive"], optional = true }
 tokio = { version = "1.54.0", features = ["time"] }
 
 [dev-dependencies]
