@@ -55,8 +55,8 @@ turns publishing into an approved action rather than something any tag push does
 2. Tag the merge commit and push the tag:
 
    ```bash
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
 The `release` workflow then verifies the release (the tag matches `Cargo.toml`;

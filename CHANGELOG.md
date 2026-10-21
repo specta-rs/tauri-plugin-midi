@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-21
+
+### Fixed
+
+- Documentation now builds on docs.rs. `[package.metadata.docs.rs]` no longer
+  sets `rustc-args = ["--cfg", "docsrs"]`, which docs.rs turns into `RUSTFLAGS`
+  — a flag cargo applies to *every* crate in the build, dependencies included.
+  It activated `#![cfg_attr(docsrs, feature(doc_auto_cfg))]` inside the old
+  `toml_edit`/`winnow`/`toml_datetime` crates that Tauri's Linux GTK stack
+  pulls in, and `doc_auto_cfg` was removed in Rust 1.92, so those dependencies
+  failed with `E0557` before this crate was ever compiled. docs.rs already
+  passes `--cfg docsrs` to rustdoc, which is the only place the crate needs it.
+  No API change.
+
 ## [0.3.0] - 2026-10-21
 
 ### Added
@@ -46,7 +60,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The plugin no longer panics at startup when registering for MIDI device-update
   notifications fails; device detection is handled by polling alone. ([#14])
 
-[Unreleased]: https://github.com/specta-rs/tauri-plugin-midi/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/specta-rs/tauri-plugin-midi/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/specta-rs/tauri-plugin-midi/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/specta-rs/tauri-plugin-midi/compare/v0.2.0...v0.3.0
 [#5]: https://github.com/specta-rs/tauri-plugin-midi/pull/21
 [#7]: https://github.com/specta-rs/tauri-plugin-midi/issues/7
