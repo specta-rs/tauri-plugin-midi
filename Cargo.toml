@@ -3,7 +3,7 @@ name = "tauri-plugin-midi"
 links = "tauri-plugin-midi"
 description = "A WebMIDI-compatible plugin for Tauri"
 license = "MIT"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Brendan Allan", "Oscar Beaumont"]
 edition = "2021"
 rust-version = "1.90"
@@ -14,10 +14,17 @@ keywords = ["tauri", "midi", "webmidi", "tauri-plugin"]
 categories = ["web-programming"]
 
 # /bin/sh RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
+#
+# Do NOT add `rustc-args = ["--cfg", "docsrs"]` here. docs.rs turns `rustc-args`
+# into RUSTFLAGS, which cargo applies to every crate in the build including
+# dependencies. The old `toml_edit`/`winnow`/`toml_datetime` crates that Tauri's
+# Linux GTK stack drags in still start with
+# `#![cfg_attr(docsrs, feature(doc_auto_cfg))]`, and `doc_auto_cfg` was removed
+# in Rust 1.92, so those dependencies fail with E0557 before our crate is even
+# reached. docs.rs already passes `--cfg docsrs` to rustdoc, which is the only
+# place this crate needs it.
 [package.metadata."docs.rs"]
 all-features = true
-rustc-args = ["--cfg", "docsrs"]
-rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 # Enables the specta/tauri-specta derives so `cargo test --features specta` can
