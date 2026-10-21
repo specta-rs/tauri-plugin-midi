@@ -3,10 +3,22 @@ import { events, commands } from "./bindings.js";
 
 // https://webaudio.github.io/web-midi-api
 
+// Backend errors arrive as plain strings; Web MIDI consumers expect DOMExceptions.
+function toMidiError(err: unknown, name: string): Error {
+  if (err instanceof Error) return err;
+  return new DOMException(String(err), name);
+}
+
 let resolve: () => void;
 const ready = new Promise((r, reject) => {
-  resolve = () => r(void 0);
-  setTimeout(() => reject(new Error("Failed to initialise WebMIDI")), 10_000);
+  const timeout = setTimeout(
+    () => reject(new DOMException("Failed to initialise WebMIDI", "NotSupportedError")),
+    10_000
+  );
+  resolve = () => {
+    clearTimeout(timeout);
+    r(void 0);
+  };
 });
 
 let _inputs: [string, string][] = [];
@@ -167,8 +179,12 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
       return this;
     }
 
-    if (this.type === "input") await commands.openInput(this.id);
-    else await commands.openOutput(this.id);
+    try {
+      if (this.type === "input") await commands.openInput(this.id);
+      else await commands.openOutput(this.id);
+    } catch (err) {
+      throw toMidiError(err, "NotAllowedError");
+    }
 
     this.connection = "open";
 
@@ -180,8 +196,12 @@ class TauriMIDIPort extends EventTarget implements MIDIPort {
   async close(): Promise<MIDIPort> {
     if (this.connection === "closed") return this;
 
-    if (this.type === "input") await commands.closeInput(this.id);
-    else await commands.closeOutput(this.id);
+    try {
+      if (this.type === "input") await commands.closeInput(this.id);
+      else await commands.closeOutput(this.id);
+    } catch (err) {
+      throw toMidiError(err, "NotAllowedError");
+    }
 
     this.connection = "closed";
 
@@ -280,7 +300,10 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
 
   send(data: number[], timestamp?: DOMHighResTimeStamp) {
     if (this.state === "disconnected")
-      throw new Error("MIDIOutput is disconnected");
+      throw new DOMException("MIDIOutput is disconnected", "InvalidStateError");
+
+    if (!Array.isArray(data) && !ArrayBuffer.isView(data))
+      throw new TypeError("MIDIOutput.send() expects an array of MIDI bytes");
 
     const p =
       this.state === "connected" && this.connection === "closed"
@@ -288,7 +311,9 @@ class TauriMIDIOutput extends TauriMIDIPort implements MIDIOutput {
         : Promise.resolve();
 
     const epoch = timestamp ? Math.trunc(performance.timeOrigin + timestamp): null;
-    p.then(() => commands.outputSend(this.id, data, epoch ? epoch.toString() : null));
+    p.then(() => commands.outputSend(this.id, data, epoch ? epoch.toString() : null)).catch((err) => {
+      console.error("Failed to send MIDI message:", toMidiError(err, "InvalidStateError"));
+    });
   }
 }
 
