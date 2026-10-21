@@ -3,7 +3,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc --noEmit && esbuild ./guest-js/index.ts --bundle --minify --outfile=src/polyfill.js --platform=browser"
+    "build": "tsc --noEmit && esbuild ./guest-js/index.ts --bundle --minify --outfile=src/polyfill.js --platform=browser",
+    "test": "node --expose-gc --test \"tests/js/*.test.mjs\""
   },
   "devDependencies": {
     "@tauri-apps/api": "2.12.4",

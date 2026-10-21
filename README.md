@@ -15,3 +15,13 @@ pnpm build
 cd example/
 pnpm tauri dev
 ```
+
+To run the tests:
+
+```bash
+pnpm i
+pnpm test
+```
+
+`pnpm test` bundles the Web MIDI polyfill and drives it against a fake Tauri IPC
+layer, so the polyfill's behaviour can be asserted from Node.
