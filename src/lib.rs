@@ -12,9 +12,8 @@ use std::{
 use midir::{MidiInput, MidiOutput};
 use tauri::{
     plugin::{Builder, TauriPlugin},
-    Manager, Runtime,
+    Emitter, Manager, Runtime,
 };
-use tauri_specta::Event;
 use tokio::time::sleep_until;
 
 #[derive(Default)]
@@ -59,7 +58,7 @@ fn get_outputs(midi_out: &midir::MidiOutput) -> Result<Vec<(String, String)>, St
 }
 
 #[tauri::command(async)]
-#[specta::specta]
+#[cfg_attr(feature = "specta", specta::specta)]
 fn open_input<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<State>,
@@ -92,9 +91,12 @@ fn open_input<R: tauri::Runtime>(
                         .expect("System time is before epoch")
                         .as_millis();
 
-                    MIDIMessage(id.to_string(), epoch.to_string(), msg.to_vec())
-                        .emit(&app)
-                        .unwrap();
+                    if let Err(err) = app.emit(
+                        "plugin:midi:midi-message",
+                        MIDIMessage(id.to_string(), epoch.to_string(), msg.to_vec()),
+                    ) {
+                        eprintln!("Failed to emit MIDI message: {err}");
+                    }
                 }
             },
             (),
@@ -107,7 +109,7 @@ fn open_input<R: tauri::Runtime>(
 }
 
 #[tauri::command(async)]
-#[specta::specta]
+#[cfg_attr(feature = "specta", specta::specta)]
 fn close_input(state: tauri::State<State>, id: String) {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -117,7 +119,7 @@ fn close_input(state: tauri::State<State>, id: String) {
 }
 
 #[tauri::command(async)]
-#[specta::specta]
+#[cfg_attr(feature = "specta", specta::specta)]
 fn open_output(state: tauri::State<State>, id: String) -> Result<(), String> {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -143,7 +145,7 @@ fn open_output(state: tauri::State<State>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-#[specta::specta]
+#[cfg_attr(feature = "specta", specta::specta)]
 fn close_output(state: tauri::State<State>, id: String) {
     let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -153,7 +155,7 @@ fn close_output(state: tauri::State<State>, id: String) {
 }
 
 #[tauri::command(async)]
-#[specta::specta]
+#[cfg_attr(feature = "specta", specta::specta)]
 fn output_send(
     tstate: tauri::State<State>,
     id: String,
@@ -201,27 +203,16 @@ fn output_send(
     Ok(())
 }
 
-#[derive(serde::Serialize, specta::Type, tauri_specta::Event, Clone, Debug)]
+#[derive(serde::Serialize, Clone, Debug)]
+#[cfg_attr(feature = "specta", derive(specta::Type, tauri_specta::Event))]
 struct StateChange {
     inputs: Vec<(String, String)>,
     outputs: Vec<(String, String)>,
 }
 
-#[derive(serde::Serialize, specta::Type, tauri_specta::Event, Clone)]
+#[derive(serde::Serialize, Clone)]
+#[cfg_attr(feature = "specta", derive(specta::Type, tauri_specta::Event))]
 struct MIDIMessage(String, String, Vec<u8>);
-
-fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
-    tauri_specta::Builder::<R>::new()
-        .plugin_name(PLUGIN_NAME)
-        .commands(tauri_specta::collect_commands![
-            open_input::<tauri::Wry>,
-            close_input,
-            open_output,
-            close_output,
-            output_send
-        ])
-        .events(tauri_specta::collect_events![StateChange, MIDIMessage])
-}
 
 /// Initialise the plugin which will take care of polyfilling WebMIDI into any Tauri webview.
 ///
@@ -256,17 +247,20 @@ fn builder<R: Runtime>() -> tauri_specta::Builder<R> {
 /// - This plugin doesn't work within iframes at the moment. It's being tracked as [#7](https://github.com/specta-rs/tauri-plugin-midi/issues/7)
 ///
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    let builder = builder::<R>();
     // Tauri did a breaking change in 2.7.0 so we do this outside to ensure backwards compatibility
     let polyfill: String = RUNTIME_POLYFILL.into();
 
     Builder::new(PLUGIN_NAME)
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler(tauri::generate_handler![
+            open_input,
+            close_input,
+            open_output,
+            close_output,
+            output_send
+        ])
         .js_init_script(polyfill)
         .setup(move |app, _| {
             app.manage(State::default());
-
-            builder.mount_events(app);
 
             let app = app.clone();
 
@@ -297,8 +291,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                         inputs: get_inputs(&midi_in).unwrap_or_default(),
                         outputs: get_outputs(&midi_out).unwrap_or_default(),
                     };
-                    if let Err(e) = state_change.emit(&app) {
-                        eprintln!("Failed to emit MIDI state change: {e}");
+                    if let Err(err) = app.emit("plugin:midi:state-change", state_change) {
+                        eprintln!("Failed to emit MIDI state change: {err}");
                     }
 
                     std::thread::sleep(Duration::from_millis(1000));
@@ -310,13 +304,22 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .build()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "specta"))]
 mod test {
     use super::*;
 
     #[test]
     fn export_types() {
-        builder::<tauri::Wry>()
+        tauri_specta::Builder::<tauri::Wry>::new()
+            .plugin_name(PLUGIN_NAME)
+            .commands(tauri_specta::collect_commands![
+                open_input::<tauri::Wry>,
+                close_input,
+                open_output,
+                close_output,
+                output_send
+            ])
+            .events(tauri_specta::collect_events![StateChange, MIDIMessage])
             .error_handling(tauri_specta::ErrorHandlingMode::Throw)
             .export(
                 specta_typescript::Typescript::default(),
