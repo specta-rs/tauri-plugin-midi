@@ -13,28 +13,67 @@
 // ever delivers `plugin:midi:state-change` / `plugin:midi:midi-message`, so if
 // the polyfill listened on any other name `requestMIDIAccess()` would never
 // settle and the messages would never arrive.
+//
+// The expected names are read out of the generated `guest-js/bindings.ts`
+// instead of being hardcoded here. That file is the contract with the Rust
+// plugin (`cargo test --features specta` produces it from `src/lib.rs`), so a
+// rename applied to `src/lib.rs` and `guest-js/index.ts` but never regenerated
+// into the bindings makes the hand-wired runtime and the contract disagree and
+// fails the comparison below - without touching this test.
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeEnv, polyfillSource, tick } from "./harness.mjs";
+import { makeEnv, polyfillSource, repoRoot, tick } from "./harness.mjs";
 
-const COMMANDS = [
-  "plugin:midi|open_input",
-  "plugin:midi|close_input",
-  "plugin:midi|open_output",
-  "plugin:midi|close_output",
-  "plugin:midi|output_send",
-];
+const BINDINGS = fs.readFileSync(path.join(repoRoot, "guest-js", "bindings.ts"), "utf8");
 
-const EVENTS = ["plugin:midi:state-change", "plugin:midi:midi-message"];
+/** The `plugin:midi|...` wire names the generated bindings invoke. */
+function bindingsCommands() {
+  return [...BINDINGS.matchAll(/__TAURI_INVOKE(?:<[^>]*>)?\(\s*["'](plugin:midi\|[^"']+)["']/g)].map(
+    (m) => m[1]
+  );
+}
 
-test("bundled polyfill wires exactly the plugin's command and event names", async () => {
+/** The `plugin:midi:...` wire names the generated bindings listen on. */
+function bindingsEvents() {
+  return [...BINDINGS.matchAll(/makeEvent(?:<[^>]*>)?\(\s*["'](plugin:midi:[^"']+)["']/g)].map(
+    (m) => m[1]
+  );
+}
+
+/** The camelCase keys the generated `commands`/`events` objects expose. */
+function bindingsKeys(block) {
+  const match = BINDINGS.match(new RegExp(`export const ${block} = \\{([\\s\\S]*?)\\n\\};`));
+  assert.ok(match, `bindings.ts has no '${block}' object`);
+  return [...match[1].matchAll(/^\s*(\w+):/gm)].map((m) => m[1]);
+}
+
+test("bundled polyfill wires exactly the names in the generated bindings", async () => {
   const source = await polyfillSource();
+
+  const commands = bindingsCommands();
+  const events = bindingsEvents();
+
+  // Guard the parsers: a contract we failed to read would make the comparisons
+  // below pass vacuously.
+  assert.ok(commands.length > 0, "bindings.ts declares no commands");
+  assert.ok(events.length > 0, "bindings.ts declares no events");
 
   const invoked = [...source.matchAll(/invoke\(\s*["'](plugin:midi\|[^"']+)["']/g)].map((m) => m[1]);
   const listened = [...source.matchAll(/listen\(\s*["'](plugin:midi:[^"']+)["']/g)].map((m) => m[1]);
 
-  assert.deepEqual([...invoked].sort(), [...COMMANDS].sort());
-  assert.deepEqual([...listened].sort(), [...EVENTS].sort());
+  assert.deepEqual([...invoked].sort(), [...commands].sort());
+  assert.deepEqual([...listened].sort(), [...events].sort());
+
+  // The runtime's API surface must mirror the bindings' keys too, so a key
+  // renamed on the Rust side (and regenerated) but not here is caught.
+  for (const key of bindingsKeys("commands")) {
+    assert.match(source, new RegExp(`\\b${key}:`), `runtime is missing command '${key}'`);
+  }
+  for (const key of bindingsKeys("events")) {
+    assert.match(source, new RegExp(`\\b${key}:`), `runtime is missing event '${key}'`);
+  }
 });
 
 test("state-change arrives on plugin:midi:state-change and populates the maps", async () => {
