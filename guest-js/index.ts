@@ -85,6 +85,36 @@ events.stateChange.listen((event) => {
   forEachMidiInstance((instance) => instance.__tauri_statechange(inputs, outputs));
 });
 
+// One process-wide `midi-message` listener for the whole polyfill, mirroring the
+// `state-change` listener above. Routing through the weak instance set — instead
+// of registering a listener per input port — means no event registration ever
+// closes over a port, so opening a port and never closing it can no longer root
+// its `MIDIAccess` (and ports, and listeners) for the lifetime of the webview.
+events.midiMessage.listen((event) => {
+  const [inputName, timestampRaw, data] = event.payload;
+
+  forEachMidiInstance((access) => {
+    // Only live input ports receive messages. Looking the id up in `inputs` (as
+    // opposed to outputs) also handles an id that exists as both.
+    const port = access.inputs.get(inputName);
+    if (!port || port.type !== "input") return;
+    // The old listener only existed between `open()` and `close()`, so match it:
+    // a port that is disconnected or closed does not receive messages.
+    if (port.connection !== "open") return;
+
+    const timestamp = parseInt(timestampRaw);
+    const midiEvent = new TauriMIDIMessageEvent("midimessage", {
+      data: new Uint8Array(data),
+    });
+
+    Object.defineProperty(midiEvent, "timeStamp", { value: timestamp });
+    // This is deprecated in spec but we'll keep it anyway for compatibility
+    Object.defineProperty(midiEvent, "receivedTime", { value: timestamp });
+
+    port.dispatchEvent(midiEvent);
+  });
+});
+
 class TauriMIDIConnectionEvent extends Event implements MIDIConnectionEvent {
   readonly port: MIDIPort;
 
@@ -352,39 +382,6 @@ class TauriMIDIInput extends TauriMIDIPort implements MIDIInput {
     this.addEventListener("midimessage", (event) => {
       if (this.onmidimessage) return this.onmidimessage(event);
     });
-  }
-
-  private stopListening?: Promise<UnlistenFn>;
-
-  open() {
-    if (!this.stopListening)
-      this.stopListening = events.midiMessage.listen((event) => {
-        const [inputName, timestampRaw, data] = event.payload;
-
-        if (inputName !== this.id) return;
-
-        const timestamp = parseInt(timestampRaw);
-        const midiEvent = new TauriMIDIMessageEvent("midimessage", {
-          data: new Uint8Array(data),
-        });
-
-        Object.defineProperty(midiEvent, 'timeStamp', { value: timestamp });
-        // This is deprecated in spec but we'll keep it anyway for compatibility
-        Object.defineProperty(midiEvent, 'receivedTime', { value: timestamp });
-
-        this.dispatchEvent(midiEvent);
-      });
-
-    return super.open();
-  }
-
-  close() {
-    if (this.stopListening) {
-      this.stopListening?.then((cb) => cb());
-      this.stopListening = undefined;
-    }
-
-    return super.close();
   }
 
   private _onmidimessage: ((this: MIDIInput, ev: Event) => any) | null = null;

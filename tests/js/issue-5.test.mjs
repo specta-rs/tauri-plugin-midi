@@ -102,31 +102,23 @@ test("midi-message is listened for on plugin:midi:midi-message and reaches onmid
   const access = await env.requestAccess();
   const input = access.inputs.get("in-1");
 
-  // The harness hides the fake IPC layer's listener map, so observe the
-  // `plugin:event|listen` call the polyfill makes when the port is opened.
-  const registered = [];
-  const unregistered = [];
-  const internals = env.ipc.internals;
-  const originalInvoke = internals.invoke;
-  internals.invoke = (command, args) => {
-    if (command === "plugin:event|listen") registered.push(args.event);
-    if (command === "plugin:event|unlisten") unregistered.push(args.event);
-    return originalInvoke(command, args);
-  };
-
+  // The `plugin:midi:midi-message` listener is registered once for the whole
+  // polyfill at module scope (#24), so `open()` no longer issues a per-port
+  // `plugin:event|listen` for it. The wire name itself is pinned by the scan in
+  // the first test; what this checks is that a message arriving on that name is
+  // routed to the matching port's `onmidimessage`.
   const received = [];
   input.onmidimessage = (event) => received.push([...event.data]);
-  await tick();
 
-  assert.deepEqual(registered, ["plugin:midi:midi-message"]);
+  // `onmidimessage` opens the port implicitly and `open()` is asynchronous, so
+  // wait for the port to reach "open" — matching Chrome, which only delivers
+  // messages to an open MIDIInput.
+  await tick();
+  assert.equal(input.connection, "open");
 
   env.midiMessage("in-1", 1234, [0x90, 0x40, 0x7f]);
   await tick();
   assert.deepEqual(received, [[0x90, 0x40, 0x7f]]);
-
-  await input.close();
-  await tick();
-  assert.deepEqual(unregistered, ["plugin:midi:midi-message"]);
 });
 
 test("the polyfill invokes the exact plugin:midi| command names", async () => {
