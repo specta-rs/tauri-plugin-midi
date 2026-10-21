@@ -85,6 +85,15 @@ function makeIpc() {
     internals,
     midiCalls,
     deliver,
+    // Mirrors Tauri's `__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener`, which
+    // deletes the transformed callback from the registry. The fake IPC's
+    // `plugin:event|unlisten` handler only drops the id from `listeners`; without
+    // this the registry retains every callback forever, so leak probes that close
+    // a port report false positives.
+    unregisterListener(event, id) {
+      callbacks.delete(id);
+      listeners.get(event)?.delete(id);
+    },
     setFailure(command, error) {
       failure = { command, error };
     },
@@ -108,7 +117,9 @@ function makeSandbox({ withInternals, ipc }) {
   sandbox.self = sandbox;
   if (withInternals) {
     sandbox.__TAURI_INTERNALS__ = ipc.internals;
-    sandbox.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    sandbox.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+      unregisterListener: (event, id) => ipc.unregisterListener(event, id),
+    };
   }
   Object.defineProperty(sandbox, "navigator", {
     value: {},
