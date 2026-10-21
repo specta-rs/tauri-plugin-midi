@@ -5,6 +5,11 @@
 // harness bundles the real polyfill (with the Tauri API modules swapped for
 // stubs) and evaluates it inside a fresh `vm` context wired up to a fake Tauri
 // IPC layer, so the polyfill's behaviour can be driven and asserted from Node.
+//
+// It can also model more than one frame at a time: each environment gets a
+// `frame` handle and frames can be linked into a top frame / child frame tree
+// whose `postMessage` traffic is routed through a shared bus that enforces the
+// same target-origin and cross-origin-location rules a browser would.
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
@@ -12,6 +17,9 @@ import * as esbuild from "esbuild";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
+
+/** Origin used for frames unless a test says otherwise. */
+export const DEFAULT_ORIGIN = "tauri://localhost";
 
 let bundlePromise;
 /** Bundle the polyfill once per process and cache the resulting IIFE source. */
@@ -93,6 +101,10 @@ function makeIpc() {
     unregisterListener(_event, id) {
       callbacks.delete(id);
     },
+    /** Names of the backend events this frame has subscribed to. */
+    get eventListeners() {
+      return [...listeners.keys()];
+    },
     setFailure(command, error) {
       failure = { command, error };
     },
@@ -102,10 +114,96 @@ function makeIpc() {
   };
 }
 
-function makeSandbox({ withInternals, ipc }) {
+function clone(value) {
+  return typeof structuredClone === "function"
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * A `postMessage` bus shared by the frames of one tree. Messages are cloned and
+ * delivered asynchronously, and `targetOrigin` is honoured the way a browser
+ * would (a mismatched target origin drops the message).
+ */
+export function createFrameBus() {
+  const frames = new Set();
+  return {
+    frames,
+    /**
+     * Every `postMessage` attempted through this bus, in order, *including* the
+     * ones the bus then drops (mismatched target origin, detached receiver). Lets
+     * a test tell "the sender never posted" apart from "the bus discarded it".
+     */
+    posts: [],
+    register(frame) {
+      frames.add(frame);
+    },
+    post(from, to, data, targetOrigin) {
+      if (!to) return;
+      this.posts.push({ from, to, data, targetOrigin });
+      if (targetOrigin !== "*" && targetOrigin !== to.origin) return;
+      // A detached frame stops accepting messages. A browser discards the post
+      // silently rather than raising, which is exactly why the relay has to prune
+      // detached children itself.
+      if (to.closed) return;
+      const event = { data: clone(data), origin: from.origin, source: proxyFor(to, from) };
+      to.received.push(event);
+      queueMicrotask(() => {
+        for (const listener of [...to.listeners]) {
+          try {
+            listener(event);
+          } catch (error) {
+            to.errors.push(error);
+          }
+        }
+      });
+    },
+  };
+}
+
+/**
+ * The object frame `receiver` sees for frame `other` (a `WindowProxy`). Its
+ * `postMessage` delivers to `other`, reading `location` throws when the two
+ * frames are cross-origin, and `closed` reports whether `other` has been
+ * detached — exactly like the real thing.
+ */
+function proxyFor(receiver, other) {
+  let proxy = receiver.known.get(other);
+  if (proxy) return proxy;
+  proxy = {
+    postMessage(data, targetOrigin) {
+      receiver.bus.post(receiver, other, data, targetOrigin);
+    },
+    get location() {
+      if (receiver.origin !== other.origin) {
+        throw new Error("SecurityError: blocked a cross-origin frame from reading location");
+      }
+      return other.location;
+    },
+    get closed() {
+      return other.closed;
+    },
+  };
+  receiver.known.set(other, proxy);
+  return proxy;
+}
+
+const SKIPPED_GLOBALS = new Set([
+  "globalThis",
+  "window",
+  "self",
+  "top",
+  "parent",
+  "location",
+  "postMessage",
+  "addEventListener",
+  "removeEventListener",
+]);
+
+function makeSandbox({ withInternals, ipc, frame, topProxy }) {
   const sandbox = {};
   for (const key of Object.getOwnPropertyNames(globalThis)) {
-    if (key === "globalThis" || key === "window" || key === "self") continue;
+    if (SKIPPED_GLOBALS.has(key)) continue;
     try {
       sandbox[key] = globalThis[key];
     } catch {
@@ -114,6 +212,30 @@ function makeSandbox({ withInternals, ipc }) {
   }
   sandbox.window = sandbox;
   sandbox.self = sandbox;
+  sandbox.top = topProxy ?? sandbox;
+  sandbox.parent = sandbox.top;
+  Object.defineProperty(sandbox, "location", {
+    value: frame.location,
+    writable: true,
+    configurable: true,
+  });
+  sandbox.postMessage = (data, targetOrigin) => frame.bus.post(frame, frame, data, targetOrigin);
+  sandbox.addEventListener = (type, listener) => {
+    if (type === "message") {
+      frame.listeners.add(listener);
+      return;
+    }
+    let listeners = frame.windowListeners.get(type);
+    if (!listeners) {
+      listeners = new Set();
+      frame.windowListeners.set(type, listeners);
+    }
+    listeners.add(listener);
+  };
+  sandbox.removeEventListener = (type, listener) => {
+    if (type === "message") frame.listeners.delete(listener);
+    else frame.windowListeners.get(type)?.delete(listener);
+  };
   if (withInternals) {
     sandbox.__TAURI_INTERNALS__ = ipc.internals;
     sandbox.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
@@ -134,17 +256,44 @@ function makeSandbox({ withInternals, ipc }) {
  * @param {{
  *   withInternals?: boolean,
  *   observeFanout?: boolean,
- *   initial?: { inputs?: [string, string][], outputs?: [string, string][] }
+ *   initial?: { inputs?: [string, string][], outputs?: [string, string][] },
+ *   origin?: string,
+ *   top?: { frame: object } | null,
+ *   bus?: object | null
  * }} [options]
  */
 export async function makeEnv({
   withInternals = true,
   observeFanout = false,
   initial = {},
+  origin = DEFAULT_ORIGIN,
+  top: topEnv = null,
+  bus = null,
 } = {}) {
   const source = await polyfillSource();
   const ipc = makeIpc();
-  const sandbox = makeSandbox({ withInternals, ipc });
+  const frameBus = bus ?? topEnv?.frame?.bus ?? createFrameBus();
+  const frame = {
+    bus: frameBus,
+    origin,
+    location: { href: `${origin}/`, origin },
+    listeners: new Set(),
+    /** Window-level (non-`message`) listeners, keyed by event type. */
+    windowListeners: new Map(),
+    /** Set when the frame is detached from the document (like removing an iframe). */
+    closed: false,
+    /** Every message event posted *to* this frame, in order. */
+    received: [],
+    /** Errors thrown by this frame's message listeners. */
+    errors: [],
+    known: new Map(),
+    sandbox: null,
+  };
+
+  const topProxy = topEnv ? proxyFor(frame, topEnv.frame) : null;
+  const sandbox = makeSandbox({ withInternals, ipc, frame, topProxy });
+  frame.sandbox = sandbox;
+  frameBus.register(frame);
   vm.createContext(sandbox);
 
   let loadError = null;
@@ -175,6 +324,7 @@ export async function makeEnv({
   return {
     sandbox,
     ipc,
+    frame,
     loadError,
     get fanout() {
       return fanout;
@@ -186,6 +336,10 @@ export async function makeEnv({
     get installed() {
       return typeof sandbox.navigator.requestMIDIAccess === "function";
     },
+    /** Message events delivered to this frame. */
+    get messages() {
+      return frame.received;
+    },
     /** Simulate the backend's periodic `state-change` event. */
     stateChange(inputs = [], outputs = []) {
       ipc.deliver("plugin:midi:state-change", { inputs, outputs });
@@ -196,6 +350,24 @@ export async function makeEnv({
     },
     requestAccess() {
       return sandbox.navigator.requestMIDIAccess();
+    },
+    /** Post a raw message from this frame into another one. */
+    postTo(target, data, targetOrigin = target.frame.origin) {
+      frameBus.post(frame, target.frame, data, targetOrigin);
+    },
+    /** Fire a window-level event (e.g. `pagehide`) inside this frame. */
+    dispatch(type, init = {}) {
+      for (const listener of [...(frame.windowListeners.get(type) ?? [])]) {
+        listener({ type, ...init });
+      }
+    },
+    /**
+     * Detach this frame from the document without unloading it, the way removing
+     * an `<iframe>` from the DOM does. The frame itself stays alive (it is what
+     * the top frame still holds a handle to) but no longer accepts messages.
+     */
+    detach() {
+      frame.closed = true;
     },
   };
 }
