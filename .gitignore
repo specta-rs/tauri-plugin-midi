@@ -14,7 +14,7 @@ Cargo.lock
 *.pdb
 
 # Node
-node_modules/
+node_modules
 
 # System files
 .DS_Store
