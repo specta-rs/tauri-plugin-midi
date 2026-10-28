@@ -35,7 +35,7 @@ specta = ["dep:specta", "dep:tauri-specta"]
 [dependencies]
 midir = "0.11"
 serde = "1"
-specta = { version = "=2.0.0-rc.25", optional = true }
+specta = { version = "=2.0.0-rc.27", optional = true }
 tauri = "2.12.4"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive"], optional = true }
 tokio = { version = "1.54.0", features = ["time"] }
