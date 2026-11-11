@@ -1,0 +1,35 @@
+name: Install Linux dependencies
+description: >
+  `tauri` links WebKitGTK/GTK and `midir` links ALSA, so the crate cannot be
+  compiled on Linux without these development packages.
+
+runs:
+  using: composite
+  steps:
+    - name: apt-get install
+      shell: bash
+      run: |
+        set -euo pipefail
+        packages=(
+          libwebkit2gtk-4.1-dev
+          libxdo-dev
+          libssl-dev
+          libayatana-appindicator3-dev
+          librsvg2-dev
+          libasound2-dev
+        )
+        # GitHub's Ubuntu mirror intermittently fails to resolve
+        # (`Temporary failure resolving 'azure.archive.ubuntu.com'`) or serves
+        # an index that the pools no longer match (404s on a fetch). `apt-get
+        # update` succeeding is not enough either way, so retry the whole
+        # update-then-install sequence rather than failing the build.
+        for attempt in 1 2 3 4 5; do
+          if sudo apt-get update \
+            && sudo apt-get install -y "${packages[@]}"; then
+            exit 0
+          fi
+          echo "::warning::apt-get failed (attempt $attempt of 5)"
+          sleep $((attempt * 10))
+        done
+        echo "::error::could not install the Linux system dependencies"
+        exit 1

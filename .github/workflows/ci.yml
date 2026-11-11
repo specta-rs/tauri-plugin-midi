@@ -21,16 +21,7 @@ jobs:
 
       # `tauri` links WebKitGTK/GTK and `midir` links ALSA on Linux, so the crate
       # cannot even be compiled without these.
-      - name: Install Tauri's Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libasound2-dev
+      - uses: ./.github/actions/install-linux-deps
 
       - name: Install Rust
         run: rustup update --no-self-update stable && rustup default stable
