@@ -41,12 +41,12 @@ serde = "1"
 # `tauri-specta` publishes the matching release.
 specta = { version = "=2.0.0-rc.28", optional = true }
 tauri = "2.12.4"
-tauri-specta = { version = "=2.0.0-rc.26", features = ["derive"], optional = true }
+tauri-specta = { version = "=2.0.0-rc.28", features = ["derive"], optional = true }
 tokio = { version = "1.54.0", features = ["time"] }
 
 [dev-dependencies]
-tauri-specta = { version = "=2.0.0-rc.26", features = ["typescript"] }
-specta-typescript = { version = "0.0.13" }
+tauri-specta = { version = "=2.0.0-rc.28", features = ["typescript"] }
+specta-typescript = { version = "0.0.15" }
 
 [build-dependencies]
 tauri-plugin = { version = "2.7.2", features = ["build"] }
