@@ -39,7 +39,7 @@ serde = "1"
 # release, so these two move together: a `specta` newer than the one
 # `tauri-specta` depends on cannot resolve. Bump them in the same commit once
 # `tauri-specta` publishes the matching release.
-specta = { version = "=2.0.0-rc.26", optional = true }
+specta = { version = "=2.0.0-rc.28", optional = true }
 tauri = "2.12.4"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive"], optional = true }
 tokio = { version = "1.54.0", features = ["time"] }
